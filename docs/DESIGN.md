@@ -3,6 +3,7 @@
 **Status:** Draft v0.2 (correct game concept)  
 **Date:** 2026-09-27  
 **Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)  
+**Drive summary:** https://docs.google.com/document/d/1aBNTdoioWOKuH9K8Hlti4h6Qy_2pxBaL9Lo3oTWhCEE/edit  
 **Note:** v0.1 incorrectly described a geopolitical country sim. This version replaces it.
 
 ---
