@@ -47,6 +47,8 @@ class GridMap:
         return 0 <= x < self.width and 0 <= y < self.height
 
     def get(self, x: int, y: int) -> Tile:
+        if not self.in_bounds(x, y):
+            raise IndexError(f"Out of bounds: ({x}, {y})")
         return self.tiles[self.index(x, y)]
 
     def neighbors4(self, x: int, y: int) -> Iterator[tuple[int, int]]:

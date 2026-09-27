@@ -216,6 +216,8 @@ class World:
         building_id: str = "foundry",
     ) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
+        if not self.grid.in_bounds(x, y):
+            raise ActionError("Out of bounds")
         tile = self.grid.get(x, y)
         if tile.kind != TileKind.PLOT or not tile.plot:
             raise ActionError("Not a plot")
@@ -271,6 +273,8 @@ class World:
 
     def merge_plots(self, owner_kind: str, owner_id: str, x1: int, y1: int, x2: int, y2: int) -> ActionResult:
         self.get_actor(owner_kind, owner_id)
+        if not self.grid.in_bounds(x1, y1) or not self.grid.in_bounds(x2, y2):
+            raise ActionError("Out of bounds")
         for x, y in ((x1, y1), (x2, y2)):
             tile = self.grid.get(x, y)
             if tile.plot and tile.plot.owned_by(owner_kind, owner_id) and not tile.plot.parcel_id:
