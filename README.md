@@ -2,7 +2,7 @@
 
 Real-time company economic simulator (Python + Web UI).
 
-Rival companies and cities will be driven by a **local LLM** (one model, many entities). Target: RTX 3050-class PCs. Ship later as a single exe that also launches the LLM.
+Rival companies and cities will be driven by a **local LLM** (one model, many entities). Target: RTX 3050-class PCs.
 
 ## Design
 
@@ -19,15 +19,17 @@ PYTHONPATH=src python -m company_sim --no-browser
 
 Open http://127.0.0.1:8765/
 
-### What works now (scaffold)
+### What works now
 
-- Real-time tick loop with pause
-- 5 cities, roads, buyable plots spawned beside roads
-- Buy plot / build workshop (placeholder production)
-- Heuristic AI stub expanding cities and buying plots (LLM not wired yet)
-- Simple 2D canvas map
+- Real-time tick loop with **pause**
+- Map generated at start: cities, road lattice, **standard/specialized** plots
+- **Every plot has road access** (asserted)
+- Player starts with **cash + starter plot + inventory**
+- Buy plot, build workshop, **build road**, **merge adjacent owned plots** (parcel production bonus)
+- Heuristic AI stub (LLM not wired yet)
 
 ### Controls
 
-- Click a green plot → **Buy plot** → **Build workshop**
-- **Pause** / Resume
+- Click plot → Buy / Build / Build road
+- Click two adjacent owned plots (second click selects; first remembered) → **Merge with last**
+- Pause / Resume

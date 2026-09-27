@@ -1,4 +1,4 @@
-"""Grid map: cities, roads, plots, buildings, parcels."""
+"""Grid map: roads, plots, buildings, parcels; cities are territories (not tiles)."""
 
 from __future__ import annotations
 
@@ -9,8 +9,7 @@ import uuid
 
 
 class TileKind(str, Enum):
-    EMPTY = "empty"  # hinterland / unused (rare after generation)
-    CITY = "city"
+    EMPTY = "empty"
     ROAD = "road"
     PLOT = "plot"
 
@@ -29,27 +28,40 @@ class BuildingType(str, Enum):
 @dataclass
 class Building:
     building_type: BuildingType
-    owner_company_id: str
+    owner_kind: str  # "company" | "city"
+    owner_id: str
     production_method_id: str | None = None
-    progress: float = 0.0  # 0..1 toward next batch
+    progress: float = 0.0
 
 
 @dataclass
 class Plot:
     plot_type: PlotType
-    owner_company_id: str | None = None
+    owner_kind: str | None = None  # "company" | "city" | None
+    owner_id: str | None = None
     building: Building | None = None
     price: int = 100  # PLACEHOLDER
-    parcel_id: str | None = None  # merged adjacent owned plots share one parcel
+    parcel_id: str | None = None
 
 
 @dataclass
 class City:
+    """
+    A city is an LLM-run administration over normal map cells — not a special tile.
+
+    Territory = set of (x, y) cells (roads + plots) assigned to this city.
+    Buildings in the city are normal plot buildings (owned by companies or the city).
+    """
+
     id: str
     name: str
-    x: int
-    y: int
+    # Anchor used for labeling / initial voronoi assignment (not a unique tile type)
+    center_x: int
+    center_y: int
     population: int = 1000
+    cash: int = 2000  # PLACEHOLDER municipal treasury
+    inventory: dict[str, int] = field(default_factory=dict)
+    territory: list[tuple[int, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -57,7 +69,7 @@ class Tile:
     x: int
     y: int
     kind: TileKind = TileKind.EMPTY
-    city_id: str | None = None
+    city_id: str | None = None  # which city administers this cell
     plot: Plot | None = None
 
 
@@ -67,7 +79,6 @@ class GridMap:
     height: int
     tiles: list[Tile] = field(default_factory=list)
     cities: dict[str, City] = field(default_factory=dict)
-    # parcel_id -> list of (x, y)
     parcels: dict[str, list[tuple[int, int]]] = field(default_factory=dict)
 
     @classmethod
@@ -91,46 +102,28 @@ class GridMap:
                 yield nx, ny
 
     def is_road_access(self, x: int, y: int) -> bool:
-        """Plot has road access if adjacent to road or city core."""
         for nx, ny in self.neighbors4(x, y):
-            kind = self.get(nx, ny).kind
-            if kind in (TileKind.ROAD, TileKind.CITY):
+            if self.get(nx, ny).kind == TileKind.ROAD:
                 return True
         return False
 
-    def place_city(self, city: City) -> None:
-        if not self.in_bounds(city.x, city.y):
-            raise ValueError(f"City out of bounds: {city.x},{city.y}")
-        tile = self.get(city.x, city.y)
-        tile.kind = TileKind.CITY
-        tile.city_id = city.id
-        tile.plot = None
-        self.cities[city.id] = city
-
     def set_road(self, x: int, y: int) -> bool:
-        """Force a cell to road (generation / build). Clears plots."""
         tile = self.get(x, y)
-        if tile.kind == TileKind.CITY:
-            return False
-        # Remove from parcel bookkeeping if converting an owned plot
         if tile.kind == TileKind.PLOT and tile.plot and tile.plot.parcel_id:
             self._remove_cell_from_parcel(tile.plot.parcel_id, x, y)
+        city_id = tile.city_id
         tile.kind = TileKind.ROAD
         tile.plot = None
-        tile.city_id = None
+        tile.city_id = city_id  # keep municipal affiliation
         return True
 
     def build_road(self, x: int, y: int) -> bool:
-        """
-        Build a road on an empty cell or unowned plot.
-        After build, convert any newly road-adjacent EMPTY hinterland into plots.
-        """
         if not self.in_bounds(x, y):
             return False
         tile = self.get(x, y)
-        if tile.kind == TileKind.CITY or tile.kind == TileKind.ROAD:
+        if tile.kind == TileKind.ROAD:
             return False
-        if tile.kind == TileKind.PLOT and tile.plot and tile.plot.owner_company_id:
+        if tile.kind == TileKind.PLOT and tile.plot and tile.plot.owner_id is not None:
             return False
         if not self.set_road(x, y):
             return False
@@ -144,11 +137,22 @@ class GridMap:
                 continue
             n.kind = TileKind.PLOT
             n.plot = Plot(plot_type=self._choose_plot_type(nx, ny), price=self._plot_price(nx, ny))
+            if n.city_id is None:
+                n.city_id = self._nearest_city_id(nx, ny)
+
+    def _nearest_city_id(self, x: int, y: int) -> str | None:
+        best_id = None
+        best_d = 10**9
+        for c in self.cities.values():
+            d = abs(x - c.center_x) + abs(y - c.center_y)
+            if d < best_d:
+                best_d = d
+                best_id = c.id
+        return best_id
 
     def _choose_plot_type(self, x: int, y: int) -> PlotType:
-        # PLACEHOLDER zoning: specialized clusters near cities / hash bands
         nearest = min(
-            (abs(x - c.x) + abs(y - c.y) for c in self.cities.values()),
+            (abs(x - c.center_x) + abs(y - c.center_y) for c in self.cities.values()),
             default=99,
         )
         if nearest <= 4 or ((x * 17 + y * 31) % 7 == 0):
@@ -159,13 +163,12 @@ class GridMap:
         ptype = self._choose_plot_type(x, y)
         base = 150 if ptype == PlotType.SPECIALIZED else 100
         nearest = min(
-            (abs(x - c.x) + abs(y - c.y) for c in self.cities.values()),
+            (abs(x - c.center_x) + abs(y - c.center_y) for c in self.cities.values()),
             default=10,
         )
         return base + max(0, 12 - nearest) * 10
 
     def ensure_all_plots_have_road_access(self) -> None:
-        """Repair pass: any plot without access gets a spur road to nearest road/city."""
         for tile in list(self.tiles):
             if tile.kind != TileKind.PLOT:
                 continue
@@ -174,33 +177,27 @@ class GridMap:
             self._spur_road_to_network(tile.x, tile.y)
 
     def _spur_road_to_network(self, x: int, y: int) -> None:
-        """Carve a short Manhattan spur from (x,y) toward nearest road/city, converting this cell's neighbor path."""
-        target = self._nearest_access_cell(x, y)
+        target = self._nearest_road_cell(x, y)
         if target is None:
-            # Absolute fallback: make one neighbor a road if possible
             for nx, ny in self.neighbors4(x, y):
-                if self.get(nx, ny).kind != TileKind.CITY:
-                    self.set_road(nx, ny)
-                    return
+                self.set_road(nx, ny)
+                return
             return
-        cx, cy = x, y
         tx, ty = target
-        # Move one step from the landlocked plot toward target by converting a neighbor to road
-        # (keep the plot itself; give it an adjacent road)
-        if cx < tx:
-            self.set_road(cx + 1, cy)
-        elif cx > tx:
-            self.set_road(cx - 1, cy)
-        elif cy < ty:
-            self.set_road(cx, cy + 1)
-        elif cy > ty:
-            self.set_road(cx, cy - 1)
+        if x < tx:
+            self.set_road(x + 1, y)
+        elif x > tx:
+            self.set_road(x - 1, y)
+        elif y < ty:
+            self.set_road(x, y + 1)
+        elif y > ty:
+            self.set_road(x, y - 1)
 
-    def _nearest_access_cell(self, x: int, y: int) -> tuple[int, int] | None:
+    def _nearest_road_cell(self, x: int, y: int) -> tuple[int, int] | None:
         best = None
         best_d = 10**9
         for t in self.tiles:
-            if t.kind not in (TileKind.ROAD, TileKind.CITY):
+            if t.kind != TileKind.ROAD:
                 continue
             d = abs(t.x - x) + abs(t.y - y)
             if d < best_d:
@@ -208,7 +205,12 @@ class GridMap:
                 best = (t.x, t.y)
         return best
 
-    # --- Parcels (merged plots) ---
+    def rebuild_territories(self) -> None:
+        for city in self.cities.values():
+            city.territory = []
+        for tile in self.tiles:
+            if tile.city_id and tile.city_id in self.cities:
+                self.cities[tile.city_id].territory.append((tile.x, tile.y))
 
     def parcel_size(self, parcel_id: str | None) -> int:
         if not parcel_id:
@@ -216,28 +218,29 @@ class GridMap:
         return max(1, len(self.parcels.get(parcel_id, [])))
 
     def production_bonus_for_plot(self, plot: Plot) -> float:
-        """PLACEHOLDER: +5% throughput per extra cell in the parcel."""
         size = self.parcel_size(plot.parcel_id)
         return 1.0 + 0.05 * (size - 1)
 
-    def merge_plots(self, company_id: str, x1: int, y1: int, x2: int, y2: int) -> str:
-        """Merge two adjacent owned plots (and their parcels) into one parcel. Returns parcel_id."""
+    def merge_plots(self, owner_kind: str, owner_id: str, x1: int, y1: int, x2: int, y2: int) -> str:
         a = self.get(x1, y1)
         b = self.get(x2, y2)
         if a.kind != TileKind.PLOT or b.kind != TileKind.PLOT or not a.plot or not b.plot:
             raise ValueError("Both cells must be plots")
-        if a.plot.owner_company_id != company_id or b.plot.owner_company_id != company_id:
+        if (
+            a.plot.owner_kind != owner_kind
+            or b.plot.owner_kind != owner_kind
+            or a.plot.owner_id != owner_id
+            or b.plot.owner_id != owner_id
+        ):
             raise ValueError("You must own both plots")
         if abs(x1 - x2) + abs(y1 - y2) != 1:
             raise ValueError("Plots must be adjacent")
         if a.plot.parcel_id and a.plot.parcel_id == b.plot.parcel_id:
             return a.plot.parcel_id
 
-        cells_a = self._parcel_cells(a.plot)
-        cells_b = self._parcel_cells(b.plot)
-        # Prefer keeping an existing parcel id
+        cells_a = list(self.parcels.get(a.plot.parcel_id or "", [])) or [(x1, y1)]
+        cells_b = list(self.parcels.get(b.plot.parcel_id or "", [])) or [(x2, y2)]
         parcel_id = a.plot.parcel_id or b.plot.parcel_id or str(uuid.uuid4())
-        # Clear old parcel entries
         for pid in {a.plot.parcel_id, b.plot.parcel_id}:
             if pid and pid in self.parcels:
                 del self.parcels[pid]
@@ -248,12 +251,6 @@ class GridMap:
             if p:
                 p.parcel_id = parcel_id
         return parcel_id
-
-    def _parcel_cells(self, plot: Plot) -> list[tuple[int, int]]:
-        if plot.parcel_id and plot.parcel_id in self.parcels:
-            return list(self.parcels[plot.parcel_id])
-        # Single-cell parcel not registered yet — find by identity scan is avoided; caller passes coords
-        return []
 
     def register_single_parcel(self, x: int, y: int) -> str:
         tile = self.get(x, y)
@@ -291,9 +288,11 @@ class GridMap:
                 {
                     "id": c.id,
                     "name": c.name,
-                    "x": c.x,
-                    "y": c.y,
+                    "center_x": c.center_x,
+                    "center_y": c.center_y,
                     "population": c.population,
+                    "cash": c.cash,
+                    "territory_size": len(c.territory),
                 }
                 for c in self.cities.values()
             ],
@@ -307,7 +306,8 @@ class GridMap:
                     if t.plot is None
                     else {
                         "plot_type": t.plot.plot_type.value,
-                        "owner_company_id": t.plot.owner_company_id,
+                        "owner_kind": t.plot.owner_kind,
+                        "owner_id": t.plot.owner_id,
                         "price": t.plot.price,
                         "parcel_id": t.plot.parcel_id,
                         "parcel_size": self.parcel_size(t.plot.parcel_id),
@@ -316,7 +316,8 @@ class GridMap:
                         if t.plot.building is None
                         else {
                             "building_type": t.plot.building.building_type.value,
-                            "owner_company_id": t.plot.building.owner_company_id,
+                            "owner_kind": t.plot.building.owner_kind,
+                            "owner_id": t.plot.building.owner_id,
                             "production_method_id": t.plot.building.production_method_id,
                             "progress": t.plot.building.progress,
                         },
@@ -337,36 +338,45 @@ def generate_map(
     """
     Determine the full grid at game start.
 
-    - Place cities
-    - Lay a road lattice (every `road_stride` rows/cols) so plots can touch roads
-    - Connect cities with Manhattan corridors
-    - Fill remaining cells as standard/specialized plots
-    - Repair any plot lacking road access
+    Cities are NOT special tiles. Each city gets a voronoi territory of normal
+    road/plot cells around an anchor point.
     """
     grid = GridMap.create(width, height)
 
     for cid, name, x, y, pop in city_seeds:
-        grid.place_city(City(id=cid, name=name, x=x, y=y, population=pop))
+        if not grid.in_bounds(x, y):
+            raise ValueError(f"City anchor out of bounds: {x},{y}")
+        grid.cities[cid] = City(
+            id=cid,
+            name=name,
+            center_x=x,
+            center_y=y,
+            population=pop,
+            inventory={"materials": 20},
+        )
 
-    # Lattice roads (cities stay cities)
+    # Assign every cell to nearest city (Manhattan)
+    for tile in grid.tiles:
+        tile.city_id = grid._nearest_city_id(tile.x, tile.y)
+
+    # Lattice roads
     for y in range(height):
         for x in range(width):
-            if grid.get(x, y).kind == TileKind.CITY:
-                continue
             if x % road_stride == 0 or y % road_stride == 0:
                 grid.set_road(x, y)
 
-    # Connect cities with corridors (ensure network even if lattice misses)
+    # Connect city anchors with corridors
     cities = list(grid.cities.values())
-    for i in range(1, len(cities)):
-        _carve_manhattan_road(grid, cities[0].x, cities[0].y, cities[i].x, cities[i].y)
+    if cities:
+        for i in range(1, len(cities)):
+            _carve_manhattan_road(
+                grid, cities[0].center_x, cities[0].center_y, cities[i].center_x, cities[i].center_y
+            )
+        for i in range(len(cities) - 1):
+            a, b = cities[i], cities[i + 1]
+            _carve_manhattan_road(grid, a.center_x, a.center_y, b.center_x, b.center_y)
 
-    # Also lightly connect sequential cities
-    for i in range(len(cities) - 1):
-        a, b = cities[i], cities[i + 1]
-        _carve_manhattan_road(grid, a.x, a.y, b.x, b.y)
-
-    # Remaining non-city, non-road → plots
+    # Remaining → plots
     for tile in grid.tiles:
         if tile.kind != TileKind.EMPTY:
             continue
@@ -377,7 +387,6 @@ def generate_map(
         )
 
     grid.ensure_all_plots_have_road_access()
-    # Re-fill: spur roads may have overwritten plots; ensure no EMPTY left unwanted
     for tile in grid.tiles:
         if tile.kind == TileKind.EMPTY:
             if grid.is_road_access(tile.x, tile.y):
@@ -391,6 +400,7 @@ def generate_map(
 
     grid.ensure_all_plots_have_road_access()
     grid.assert_plot_road_access()
+    grid.rebuild_territories()
     return grid
 
 
@@ -398,9 +408,7 @@ def _carve_manhattan_road(grid: GridMap, x0: int, y0: int, x1: int, y1: int) -> 
     x, y = x0, y0
     while x != x1:
         x += 1 if x1 > x else -1
-        if grid.get(x, y).kind != TileKind.CITY:
-            grid.set_road(x, y)
+        grid.set_road(x, y)
     while y != y1:
         y += 1 if y1 > y else -1
-        if grid.get(x, y).kind != TileKind.CITY:
-            grid.set_road(x, y)
+        grid.set_road(x, y)

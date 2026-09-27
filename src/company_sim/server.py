@@ -87,7 +87,7 @@ def create_app() -> FastAPI:
     @app.post("/api/player/buy_plot")
     def buy_plot(body: BuyPlotBody) -> dict[str, Any]:
         try:
-            result = world.buy_plot(world.player_company_id, body.x, body.y)
+            result = world.buy_plot("company", world.player_company_id, body.x, body.y)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}
@@ -96,7 +96,9 @@ def create_app() -> FastAPI:
     def build(body: BuildBody) -> dict[str, Any]:
         try:
             btype = BuildingType(body.building_type)
-            result = world.build_building(world.player_company_id, body.x, body.y, btype)
+            result = world.build_building(
+                "company", world.player_company_id, body.x, body.y, btype
+            )
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except (ActionError, ValueError) as exc:
             msg = exc.message if isinstance(exc, ActionError) else str(exc)
@@ -114,7 +116,12 @@ def create_app() -> FastAPI:
     def merge_plots(body: MergeBody) -> dict[str, Any]:
         try:
             result = world.merge_plots(
-                world.player_company_id, body.x1, body.y1, body.x2, body.y2
+                "company",
+                world.player_company_id,
+                body.x1,
+                body.y1,
+                body.x2,
+                body.y2,
             )
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:

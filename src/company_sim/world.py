@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from company_sim.actions import ActionError, ActionResult
 from company_sim.company import PLACEHOLDER_METHODS, Company
-from company_sim.map_grid import Building, BuildingType, TileKind, generate_map
+from company_sim.map_grid import Building, BuildingType, GridMap, TileKind, generate_map
 
 
 @dataclass
@@ -15,7 +15,7 @@ class WorldConfig:
     map_height: int = 30
     tick_hz: float = 10.0
     starting_cities: int = 5
-    ai_company_count: int = 5  # start smaller; design allows up to ~20
+    ai_company_count: int = 5
     road_stride: int = 3
     player_starting_cash: int = 2500
     road_build_cost: int = 50  # PLACEHOLDER
@@ -24,7 +24,7 @@ class WorldConfig:
 @dataclass
 class World:
     config: WorldConfig
-    grid: object  # GridMap
+    grid: GridMap
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
     time_sec: float = 0.0
@@ -59,7 +59,7 @@ class World:
         )
         world.companies[player.id] = player
         world.player_company_id = player.id
-        world._assign_starter_plot(player.id)
+        world._assign_starter_plot("company", player.id)
 
         for i in range(config.ai_company_count):
             cid = f"ai_{i+1}"
@@ -71,29 +71,43 @@ class World:
                 inventory={"materials": 15, "goods": 0},
             )
 
+        # Each city claims one municipal starter plot near its center (normal plot + optional later building)
+        for city in grid.cities.values():
+            world._assign_starter_plot("city", city.id, near=(city.center_x, city.center_y))
+
         return world
 
-    def _assign_starter_plot(self, company_id: str) -> None:
-        """Give the player a free owned plot adjacent to a city/road, near first city."""
-        cities = list(self.grid.cities.values())
-        if not cities:
-            return
-        city = cities[0]
+    def _assign_starter_plot(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        near: tuple[int, int] | None = None,
+    ) -> None:
+        if near is None:
+            cities = list(self.grid.cities.values())
+            if not cities:
+                return
+            near = (cities[0].center_x, cities[0].center_y)
+        nx0, ny0 = near
         candidates = []
         for tile in self.grid.tiles:
             if tile.kind != TileKind.PLOT or not tile.plot:
                 continue
-            if tile.plot.owner_company_id is not None:
+            if tile.plot.owner_id is not None:
                 continue
             if not self.grid.is_road_access(tile.x, tile.y):
                 continue
-            dist = abs(tile.x - city.x) + abs(tile.y - city.y)
+            # Prefer plots inside the owner's city territory when assigning to a city
+            if owner_kind == "city" and tile.city_id != owner_id:
+                continue
+            dist = abs(tile.x - nx0) + abs(tile.y - ny0)
             candidates.append((dist, tile))
         if not candidates:
             return
         candidates.sort(key=lambda t: t[0])
         tile = candidates[0][1]
-        tile.plot.owner_company_id = company_id
+        tile.plot.owner_kind = owner_kind
+        tile.plot.owner_id = owner_id
         tile.plot.price = 0
         self.grid.register_single_parcel(tile.x, tile.y)
 
@@ -113,96 +127,113 @@ class World:
             b = tile.plot.building
             if not b.production_method_id:
                 continue
-            company = self.companies.get(b.owner_company_id)
-            if not company:
+            inventory = self._inventory_for(b.owner_kind, b.owner_id)
+            if inventory is None:
                 continue
             bonus = self.grid.production_bonus_for_plot(tile.plot)
             b.progress += (dt / duration) * bonus
             while b.progress >= 1.0:
                 b.progress -= 1.0
-                self._try_complete_batch(company, method)
+                self._try_complete_batch(inventory, method)
 
-    def _try_complete_batch(self, company: Company, method: dict) -> None:
+    def _inventory_for(self, owner_kind: str, owner_id: str) -> dict[str, int] | None:
+        if owner_kind == "company":
+            company = self.companies.get(owner_id)
+            return company.inventory if company else None
+        if owner_kind == "city":
+            city = self.grid.cities.get(owner_id)
+            return city.inventory if city else None
+        return None
+
+    def _cash_for(self, owner_kind: str, owner_id: str) -> int | None:
+        if owner_kind == "company":
+            company = self.companies.get(owner_id)
+            return company.cash if company else None
+        if owner_kind == "city":
+            city = self.grid.cities.get(owner_id)
+            return city.cash if city else None
+        return None
+
+    def _set_cash(self, owner_kind: str, owner_id: str, value: int) -> None:
+        if owner_kind == "company":
+            self.companies[owner_id].cash = value
+        elif owner_kind == "city":
+            self.grid.cities[owner_id].cash = value
+
+    def _try_complete_batch(self, inventory: dict[str, int], method: dict) -> None:
         for good, qty in method["inputs"].items():
-            if company.inventory.get(good, 0) < qty:
+            if inventory.get(good, 0) < qty:
                 return
         for good, qty in method["inputs"].items():
-            company.inventory[good] = company.inventory.get(good, 0) - qty
+            inventory[good] = inventory.get(good, 0) - qty
         for good, qty in method["outputs"].items():
-            company.inventory[good] = company.inventory.get(good, 0) + qty
+            inventory[good] = inventory.get(good, 0) + qty
 
-    # --- Actions ---
-
-    def buy_plot(self, company_id: str, x: int, y: int) -> ActionResult:
-        company = self._require_company(company_id)
+    def buy_plot(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
+        self._require_actor(owner_kind, owner_id)
         if not self.grid.in_bounds(x, y):
             raise ActionError("Out of bounds")
         tile = self.grid.get(x, y)
         if tile.kind != TileKind.PLOT or tile.plot is None:
             raise ActionError("Not a buyable plot")
-        if tile.plot.owner_company_id is not None:
+        if tile.plot.owner_id is not None:
             raise ActionError("Plot already owned")
         if not self.grid.is_road_access(x, y):
             raise ActionError("Plot has no road access")
         price = tile.plot.price
-        if company.cash < price:
+        cash = self._cash_for(owner_kind, owner_id)
+        if cash is None or cash < price:
             raise ActionError("Not enough cash")
-        company.cash -= price
-        tile.plot.owner_company_id = company_id
+        self._set_cash(owner_kind, owner_id, cash - price)
+        tile.plot.owner_kind = owner_kind
+        tile.plot.owner_id = owner_id
         self.grid.register_single_parcel(x, y)
         return ActionResult(True, f"Bought plot ({x},{y}) for {price}", {"x": x, "y": y, "price": price})
 
     def build_building(
         self,
-        company_id: str,
+        owner_kind: str,
+        owner_id: str,
         x: int,
         y: int,
         building_type: BuildingType = BuildingType.WORKSHOP,
     ) -> ActionResult:
-        company = self._require_company(company_id)
+        self._require_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
         if tile.kind != TileKind.PLOT or not tile.plot:
             raise ActionError("Not a plot")
-        if tile.plot.owner_company_id != company_id:
+        if tile.plot.owner_kind != owner_kind or tile.plot.owner_id != owner_id:
             raise ActionError("You do not own this plot")
         if tile.plot.building is not None:
             raise ActionError("Plot already has a building")
         cost = 200  # PLACEHOLDER
-        if company.cash < cost:
+        cash = self._cash_for(owner_kind, owner_id)
+        if cash is None or cash < cost:
             raise ActionError("Not enough cash")
-        company.cash -= cost
+        self._set_cash(owner_kind, owner_id, cash - cost)
         tile.plot.building = Building(
             building_type=building_type,
-            owner_company_id=company_id,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
             production_method_id="basic_goods",
         )
         return ActionResult(True, f"Built {building_type.value} at ({x},{y})", {"cost": cost})
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int) -> ActionResult:
-        """Cities or companies can build roads on empty/unowned plot cells."""
-        if actor_kind == "city":
-            if actor_id not in self.grid.cities:
-                raise ActionError("Unknown city")
-        elif actor_kind == "company":
-            company = self._require_company(actor_id)
-            cost = self.config.road_build_cost
-            if company.cash < cost:
-                raise ActionError("Not enough cash")
-        else:
-            raise ActionError("Invalid actor")
-
+        self._require_actor(actor_kind, actor_id)
+        cost = self.config.road_build_cost if actor_kind in ("company", "city") else 0
+        cash = self._cash_for(actor_kind, actor_id)
+        if cash is None or cash < cost:
+            raise ActionError("Not enough cash")
         if not self.grid.build_road(x, y):
             raise ActionError("Cannot build road there")
-
-        if actor_kind == "company":
-            company = self.companies[actor_id]
-            company.cash -= self.config.road_build_cost
-            return ActionResult(
-                True,
-                f"Company {actor_id} built road at ({x},{y})",
-                {"cost": self.config.road_build_cost},
-            )
-        return ActionResult(True, f"City {actor_id} built road at ({x},{y})")
+        self._set_cash(actor_kind, actor_id, cash - cost)
+        self.grid.rebuild_territories()
+        return ActionResult(
+            True,
+            f"{actor_kind} {actor_id} built road at ({x},{y})",
+            {"cost": cost},
+        )
 
     def city_build_road(self, city_id: str, x: int, y: int) -> ActionResult:
         return self.build_road("city", city_id, x, y)
@@ -210,54 +241,35 @@ class World:
     def company_build_road(self, company_id: str, x: int, y: int) -> ActionResult:
         return self.build_road("company", company_id, x, y)
 
-    def merge_plots(self, company_id: str, x1: int, y1: int, x2: int, y2: int) -> ActionResult:
-        self._require_company(company_id)
+    def merge_plots(self, owner_kind: str, owner_id: str, x1: int, y1: int, x2: int, y2: int) -> ActionResult:
+        self._require_actor(owner_kind, owner_id)
+        for x, y in ((x1, y1), (x2, y2)):
+            tile = self.grid.get(x, y)
+            if (
+                tile.plot
+                and tile.plot.owner_kind == owner_kind
+                and tile.plot.owner_id == owner_id
+                and not tile.plot.parcel_id
+            ):
+                self.grid.register_single_parcel(x, y)
         try:
-            # Ensure singleton parcels exist for merge bookkeeping
-            for x, y in ((x1, y1), (x2, y2)):
-                tile = self.grid.get(x, y)
-                if tile.plot and tile.plot.owner_company_id == company_id and not tile.plot.parcel_id:
-                    self.grid.register_single_parcel(x, y)
-            # Fix merge helper to include coords when parcel lists empty
-            parcel_id = self._merge_owned_plots(company_id, x1, y1, x2, y2)
+            parcel_id = self.grid.merge_plots(owner_kind, owner_id, x1, y1, x2, y2)
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
         size = self.grid.parcel_size(parcel_id)
-        return ActionResult(
-            True,
-            f"Merged plots into parcel ({size} cells)",
-            {"parcel_id": parcel_id, "size": size},
-        )
-
-    def _merge_owned_plots(self, company_id: str, x1: int, y1: int, x2: int, y2: int) -> str:
-        a = self.grid.get(x1, y1)
-        b = self.grid.get(x2, y2)
-        if a.kind != TileKind.PLOT or b.kind != TileKind.PLOT or not a.plot or not b.plot:
-            raise ValueError("Both cells must be plots")
-        if a.plot.owner_company_id != company_id or b.plot.owner_company_id != company_id:
-            raise ValueError("You must own both plots")
-        if abs(x1 - x2) + abs(y1 - y2) != 1:
-            raise ValueError("Plots must be adjacent")
-
-        if not a.plot.parcel_id:
-            self.grid.register_single_parcel(x1, y1)
-        if not b.plot.parcel_id:
-            self.grid.register_single_parcel(x2, y2)
-
-        if a.plot.parcel_id == b.plot.parcel_id:
-            return a.plot.parcel_id  # type: ignore[return-value]
-
-        return self.grid.merge_plots(company_id, x1, y1, x2, y2)
+        return ActionResult(True, f"Merged plots into parcel ({size} cells)", {"parcel_id": parcel_id, "size": size})
 
     def set_paused(self, paused: bool) -> ActionResult:
         self.paused = paused
         return ActionResult(True, "paused" if paused else "resumed")
 
-    def _require_company(self, company_id: str) -> Company:
-        company = self.companies.get(company_id)
-        if not company:
+    def _require_actor(self, kind: str, actor_id: str) -> None:
+        if kind == "company" and actor_id not in self.companies:
             raise ActionError("Unknown company")
-        return company
+        if kind == "city" and actor_id not in self.grid.cities:
+            raise ActionError("Unknown city")
+        if kind not in ("company", "city"):
+            raise ActionError("Invalid actor")
 
     def to_public_dict(self) -> dict:
         return {

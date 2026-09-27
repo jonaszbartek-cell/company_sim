@@ -1,96 +1,91 @@
 # company_sim — Design Document
 
-**Status:** Draft v0.4 (map rules locked)  
+**Status:** Draft v0.5  
 **Date:** 2026-09-27  
 **Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)
 
 ---
 
-## 1. Game concept (Owner-defined)
+## 1. Game concept
 
-A **real-time company economic simulator** on a **2D grid map**:
+Real-time company economic simulator on a **2D grid** of **normal roads and plots only**.
 
-- Grid layout is **determined at game start**.
-- Cells are **city**, **road**, or **plot** (`standard` / `specialized`).
-- Generator **guarantees every plot has road access** (adjacent to road or city).
-- **Adjacent owned plots can be merged** into a larger parcel (mechanical bonuses).
-- **Cities and companies** can build roads (onto empty/unowned plot cells).
-- Companies build **buildings** on owned plots and choose **production methods** (content TBD).
-- Trade: company↔company, company↔city, company↔market (market TBD).
-- **Population** exists (formulas TBD).
-- **1 player** + up to **~20 AI companies** + **~5 LLM cities**, one local LLM switching entities.
-- Python + Web UI → later one exe that also launches the LLM.
-- Target: **RTX 3050**; first visuals: simple 2D.
-- Real-time with **pause**.
-- Player starts with **cash + starter plot + inventory**.
+### City clarification (Owner)
 
-Goods / production method catalog: **TBD later**.
+A **city is not a special tile or mega-building**.
+
+A city is an **LLM agent** responsible for running a municipality. On the map, that municipality is just:
+
+- normal **roads**
+- normal **plots** (standard / specialized)
+- normal **buildings** on those plots (companies or the city itself may own them)
+
+The city agent administers a **territory** (set of cells) and acts through the same kinds of actions as companies where relevant (roads, claiming/building on plots, later trade/policy).
 
 ---
 
-## 2. Locked technical decisions
+## 2. Locked decisions
 
 | Topic | Decision |
 |-------|----------|
-| Language / UI | Python backend + Web UI |
-| Distribution | Single exe launches game + LLM child process |
-| Time model | Real-time + pause |
-| GPU target | RTX 3050 |
-| AI | One LLM, many entities (companies + cities) |
-| Map | Square grid, generated at start |
-| Plot types | `standard`, `specialized` (+ roads/cities as tile kinds) |
-| Road access | Invariant: every plot adjacent to road or city |
-| Plot merge | Adjacent owned plots → parcel; bonus scales with size |
-| Road builders | Cities **and** companies |
-| Player start | Cash + free starter plot + inventory |
-| Content (goods/recipes) | Later |
+| Stack | Python + Web UI → later one exe + local LLM |
+| Time | Real-time + pause |
+| GPU | RTX 3050 |
+| AI | One LLM switching across ~20 companies + ~5 cities |
+| Map cells | Only `road` and `plot` (+ rare empty hinterland) |
+| City | LLM + territory + treasury/inventory — **not** a unique cell type |
+| Plot types | `standard`, `specialized` |
+| Road access | Every plot adjacent to a road |
+| Merge | Adjacent owned plots → parcel bonuses |
+| Road builders | Cities and companies |
+| Player start | Cash + starter plot + inventory |
+| Goods/recipes | TBD |
 
 ---
 
-## 3. Map generation (current approach)
+## 3. World model
 
-1. Place city cores.
-2. Lay a road lattice (stride configurable, default every 3rd row/col).
-3. Carve Manhattan corridors between cities.
-4. Remaining cells → `standard` / `specialized` plots.
-5. Repair pass: any plot lacking access gets a spur road; assert invariant.
+```text
+Map tiles: road | plot
+Plot: type, owner (company|city|none), building?, parcel?
 
-Late expansion: cities/companies may convert **unowned** plots (or empty hinterland) into roads; new road-adjacent empty cells become plots.
+City agent:
+  id, name, population, cash, inventory
+  territory: list of cells (administrative region)
+  center: label/voronoi anchor only
 
-### 3.1 Parcels
+Company agent:
+  id, name, cash, inventory
+  owns plots/buildings (same plot system)
+```
 
-- Buying a plot registers a 1-cell parcel.
-- `merge_plots` joins adjacent owned parcels.
-- PLACEHOLDER bonus: `throughput *= 1 + 0.05 * (parcel_size - 1)`.
-
----
-
-## 4. Real-time + LLM architecture
-
-Unchanged from v0.3: fixed tick sim; LLM worker async; never block the tick loop; compact per-entity context; fail-soft timeouts.
+Ownership is unified: `owner_kind` + `owner_id` (`company` or `city`).
 
 ---
 
-## 5. MVP stages
+## 4. Map generation
 
-| Stage | Goal | Status |
-|-------|------|--------|
-| S0 Design + shell | Runnable tick + canvas | done |
-| S1 Map gen + road access + merge + starter | this revision | in progress |
-| S2 Production methods (data-driven) | waiting on content | pending |
-| S3 Trades | pending | |
-| S4 LLM worker | pending | |
-| S5 Packaging exe+llama | pending | |
+1. Place city **anchors** (not special tiles).
+2. Voronoi-assign every cell to nearest city → `tile.city_id`.
+3. Road lattice + corridors between anchors.
+4. Remaining cells → plots.
+5. Assert every plot has road access.
+6. Build city.territory lists from `city_id`.
 
 ---
 
-## 6. What I need next
+## 5. Assumptions (changeable)
 
-Not blocking for map/code:
+- Territory boundaries start as nearest-city voronoi; later growth/annexation TBD.
+- Cities may own plots and build buildings like companies (municipal workshops for now).
+- Soft UI tint shows which city administers a cell; no “C” mega-tile.
 
-1. First **goods + production methods + building types** list (when ready).
-2. What **specialized** plots do differently (bonus to certain recipes? only certain buildings?).
-3. Exact parcel bonuses (replace PLACEHOLDER +5%/cell).
-4. Road build costs / permissions (can you pave over your own empty plot?).
+---
 
-I will keep PLACEHOLDER values until you specify.
+## 6. Need later (not blocking)
+
+1. Specialized plot rules  
+2. Parcel bonus values  
+3. Goods / buildings / production methods  
+4. How city population relates to buildings vs abstract stock  
+5. Whether companies need city permission to build in a territory  

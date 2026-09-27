@@ -12,8 +12,8 @@ const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
 
 let state = null;
-let selected = null; // {x,y}
-let lastOwnedClick = null; // for merge
+let selected = null;
+let lastOwnedClick = null;
 let cellSize = 20;
 
 function resize() {
@@ -27,6 +27,10 @@ window.addEventListener("resize", resize);
 function tileAt(x, y) {
   if (!state) return null;
   return state.map.tiles.find((t) => t.x === x && t.y === y) || null;
+}
+
+function isPlayerOwned(plot) {
+  return plot && plot.owner_kind === "company" && plot.owner_id === state.player_company_id;
 }
 
 function draw() {
@@ -56,22 +60,25 @@ function draw() {
     const px = ox + t.x * cellSize;
     const py = oy + t.y * cellSize;
     if (t.kind === "road") ctx.fillStyle = "#5a6570";
-    else if (t.kind === "city") ctx.fillStyle = "#f0c14a";
     else if (t.kind === "plot") {
       if (t.plot?.building) ctx.fillStyle = "#c47a4a";
-      else if (t.plot?.owner_company_id === state.player_company_id) ctx.fillStyle = "#2f8f6b";
-      else if (t.plot?.owner_company_id) ctx.fillStyle = "#6b3f5a";
+      else if (isPlayerOwned(t.plot)) ctx.fillStyle = "#2f8f6b";
+      else if (t.plot?.owner_kind === "city") ctx.fillStyle = "#7a6a3a";
+      else if (t.plot?.owner_kind === "company") ctx.fillStyle = "#6b3f5a";
       else if (t.plot?.plot_type === "specialized") ctx.fillStyle = "#4a6b3f";
       else ctx.fillStyle = "#3f6b4f";
     } else continue;
     ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
 
-    if (t.kind === "city") {
-      ctx.fillStyle = "#1a1408";
-      ctx.font = `${Math.max(9, cellSize * 0.45)}px sans-serif`;
-      ctx.fillText("C", px + 4, py + cellSize - 4);
+    if (t.city_id) {
+      const idx = state.map.cities.findIndex((c) => c.id === t.city_id);
+      const hues = [210, 140, 30, 300, 0];
+      const h = hues[(idx >= 0 ? idx : 0) % hues.length];
+      ctx.fillStyle = `hsla(${h}, 40%, 50%, 0.08)`;
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
-    if (t.plot?.plot_type === "specialized" && !t.plot.building && !t.plot.owner_company_id) {
+
+    if (t.plot?.plot_type === "specialized" && !t.plot.building && !t.plot.owner_id) {
       ctx.fillStyle = "rgba(255,220,120,0.35)";
       ctx.fillRect(px + 2, py + 2, 3, 3);
     }
@@ -82,7 +89,7 @@ function draw() {
     if (t.plot?.building) {
       ctx.fillStyle = "#1a1008";
       ctx.font = `${Math.max(9, cellSize * 0.4)}px sans-serif`;
-      ctx.fillText("B", px + 3, py + cellSize - 3);
+      ctx.fillText(t.plot.owner_kind === "city" ? "M" : "B", px + 3, py + cellSize - 3);
       const p = t.plot.building.progress || 0;
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(px + 2, py + 2, cellSize - 4, 3);
@@ -103,9 +110,9 @@ function draw() {
   ctx.fillStyle = "#e7eef2";
   ctx.font = "12px sans-serif";
   for (const c of state.map.cities) {
-    const px = ox + c.x * cellSize + cellSize + 4;
-    const py = oy + c.y * cellSize + cellSize * 0.7;
-    ctx.fillText(`${c.name} (${c.population})`, px, py);
+    const px = ox + c.center_x * cellSize + 4;
+    const py = oy + c.center_y * cellSize - 4;
+    ctx.fillText(`${c.name}`, px, py);
   }
 }
 
@@ -127,25 +134,11 @@ function refreshPanels() {
   }
   const t = tileAt(selected.x, selected.y);
   selectedEl.textContent = JSON.stringify({ x: selected.x, y: selected.y, tile: t }, null, 2);
-  const canBuy = t && t.kind === "plot" && t.plot && !t.plot.owner_company_id;
-  const canBuild =
-    t &&
-    t.kind === "plot" &&
-    t.plot &&
-    t.plot.owner_company_id === state.player_company_id &&
-    !t.plot.building;
-  const canRoad =
-    t &&
-    ((t.kind === "plot" && t.plot && !t.plot.owner_company_id) || t.kind === "empty");
+  const canBuy = t && t.kind === "plot" && t.plot && !t.plot.owner_id;
+  const canBuild = t && t.kind === "plot" && isPlayerOwned(t.plot) && !t.plot.building;
+  const canRoad = t && ((t.kind === "plot" && t.plot && !t.plot.owner_id) || t.kind === "empty");
   let canMerge = false;
-  if (
-    lastOwnedClick &&
-    t &&
-    t.kind === "plot" &&
-    t.plot &&
-    t.plot.owner_company_id === state.player_company_id &&
-    !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)
-  ) {
+  if (lastOwnedClick && t && isPlayerOwned(t.plot) && !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)) {
     const dist = Math.abs(lastOwnedClick.x - selected.x) + Math.abs(lastOwnedClick.y - selected.y);
     canMerge = dist === 1;
   }
@@ -178,7 +171,7 @@ canvas.addEventListener("click", (ev) => {
   const prev = selected;
   selected = { x, y };
   const t = tileAt(x, y);
-  if (t && t.kind === "plot" && t.plot && t.plot.owner_company_id === state.player_company_id) {
+  if (t && isPlayerOwned(t.plot)) {
     if (prev && (prev.x !== x || prev.y !== y)) lastOwnedClick = prev;
     else if (!lastOwnedClick) lastOwnedClick = { x, y };
   }
