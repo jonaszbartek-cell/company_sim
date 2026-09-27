@@ -7,6 +7,7 @@ Real-time company economic simulator (Python + Web UI).
 ## Docs
 
 - [docs/DESIGN.md](docs/DESIGN.md)
+- [docs/CLASSES.md](docs/CLASSES.md) — domain classes (`Actor`, `Item`, `Plot`, …)
 - [docs/LLM.md](docs/LLM.md) — enable Ollama / tool bridge
 
 ## Run (dev)
