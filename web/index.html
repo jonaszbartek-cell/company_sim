@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>company_sim</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">company_sim</div>
+      <div id="hud-time" class="hud">t=0</div>
+      <div id="hud-cash" class="hud">cash=—</div>
+      <button id="btn-pause" type="button">Pause</button>
+    </header>
+    <main>
+      <canvas id="map" width="960" height="720"></canvas>
+      <aside>
+        <h2>Selected</h2>
+        <pre id="selected">Click a plot</pre>
+        <div class="row">
+          <button id="btn-buy" type="button" disabled>Buy plot</button>
+          <button id="btn-build" type="button" disabled>Build workshop</button>
+        </div>
+        <h2>Inventory</h2>
+        <pre id="inventory">—</pre>
+        <h2>AI (stub)</h2>
+        <pre id="ai-log">—</pre>
+        <p class="hint">PLACEHOLDER economy. Roads expand from cities; plots appear beside roads.</p>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
