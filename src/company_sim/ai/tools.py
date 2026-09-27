@@ -9,7 +9,6 @@ from typing import Any, TYPE_CHECKING
 
 from company_sim.actions import ActionError
 from company_sim.map_grid import TileKind
-from company_sim.plots import BuildingType
 
 if TYPE_CHECKING:
     from company_sim.actors import Actor
@@ -63,16 +62,15 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "build_building",
-            "description": "Build a workshop on a plot you own.",
+            "description": "Build a building on a plot you own (default: foundry).",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
-                    "building_type": {
+                    "building_id": {
                         "type": "string",
-                        "enum": ["workshop", "warehouse"],
-                        "description": "Default workshop",
+                        "description": "Building id from content catalog (e.g. foundry)",
                     },
                 },
                 "required": ["x", "y"],
@@ -267,8 +265,8 @@ class ToolExecutor:
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_building":
-            btype = BuildingType(args.get("building_type", "workshop"))
-            r = self.world.build_building(kind, aid, int(args["x"]), int(args["y"]), btype)
+            building_id = str(args.get("building_id", "foundry"))
+            r = self.world.build_building(kind, aid, int(args["x"]), int(args["y"]), building_id)
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_road":

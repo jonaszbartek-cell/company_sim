@@ -14,7 +14,6 @@ from pydantic import BaseModel
 
 from company_sim.actions import ActionError
 from company_sim.ai.scheduler import AIScheduler
-from company_sim.plots import BuildingType
 from company_sim.world import World, WorldConfig
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
@@ -28,7 +27,7 @@ class BuyPlotBody(BaseModel):
 class BuildBody(BaseModel):
     x: int
     y: int
-    building_type: str = "workshop"
+    building_id: str = "foundry"
 
 
 class PauseBody(BaseModel):
@@ -112,14 +111,16 @@ def create_app() -> FastAPI:
     @app.post("/api/player/build")
     def build(body: BuildBody) -> dict[str, Any]:
         try:
-            btype = BuildingType(body.building_type)
             result = world.build_building(
-                "company", world.player_company_id, body.x, body.y, btype
+                "company",
+                world.player_company_id,
+                body.x,
+                body.y,
+                body.building_id,
             )
             return {"ok": result.ok, "message": result.message, "data": result.data}
-        except (ActionError, ValueError) as exc:
-            msg = exc.message if isinstance(exc, ActionError) else str(exc)
-            return {"ok": False, "message": msg}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
 
     @app.post("/api/player/build_road")
     def build_road(body: RoadBody) -> dict[str, Any]:

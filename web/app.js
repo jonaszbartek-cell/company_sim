@@ -206,7 +206,7 @@ btnBuild.addEventListener("click", async () => {
   const res = await fetch("/api/player/build", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...selected, building_type: "workshop" }),
+    body: JSON.stringify({ ...selected, building_id: "foundry" }),
   });
   const data = await res.json();
   if (!data.ok) alert(data.message);

@@ -1,31 +1,44 @@
 # Class model (domain)
 
+## Core loop
+
+```text
+Plot (land)
+  └── Building instance (e.g. Foundry)   ← BuildingDefinition from data/buildings.yaml
+        └── ProductionMethod (e.g. Make Steel)  ← data/production_methods.yaml
+              uses Item ids (iron, coal, energy → steel)  ← data/items.yaml
+
+Actor (Company | City)
+  └── Inventory of Items
+```
+
 ## Implemented
 
-| Class | Role |
+| Class | Role | Data file |
+|-------|------|-----------|
+| `Actor` / `Company` / `City` | Economic agents | — |
+| `Item` + `ItemCatalog` | Goods | `data/items.yaml` |
+| `Inventory` | Stock by item id | — |
+| `BuildingDefinition` + `BuildingCatalog` | Buildable types | `data/buildings.yaml` |
+| `Building` | Instance on a plot | — |
+| `ProductionMethod` + catalog | Recipes | `data/production_methods.yaml` |
+| `Plot` / `Parcel` | Land + merge bonuses | — |
+| `GameContent` | Loads + validates all YAML | `data/*` |
+| `Tile` / `GridMap` | Spatial grid | — |
+
+## Seed content (now)
+
+- Items: **iron, coal, energy, steel**
+- Building: **foundry**
+- Method: **make_steel** (1+1+1 → 1 steel)
+
+## Suggested later (not built yet)
+
+| Class | When |
 |-------|------|
-| `Actor` | Shared base: cash + inventory |
-| `Company` / `City` | Actor subtypes |
-| `Item` | Good definition (input/output) |
-| `ItemCatalog` | Registry loaded from `data/items.yaml` |
-| `Inventory` | Quantities by item id on an Actor |
-| `ProductionMethod` | Recipe: inputs → outputs over time |
-| `ProductionCatalog` | Registry from `data/production_methods.yaml` |
-| `Plot` | Buyable land cell; optional building; parcel link |
-| `Building` | Structure on a plot running a production method |
-| `Parcel` | Merged adjacent owned plots + bonus |
-| `Tile` / `GridMap` | Spatial container (road/plot cells) |
+| `TradeOffer` / `Trade` | Direct trading |
+| `Market` | Shared buy/sell board |
+| Population / demand basket | City consumption |
+| `Contract` | Standing supply deals |
 
-## Suggested next (when needed — don’t build early)
-
-| Class | Why | When |
-|-------|-----|------|
-| **`BuildingDefinition`** | Data for build cost, size, allowed methods (not just enum) | When you add more building types |
-| **`TradeOffer` / `Trade`** | Company↔company / city / market deals | When implementing trade |
-| **`Market` / `MarketListing`** | Shared buy/sell board | After direct trades exist |
-| **`Population` / demand basket** | City people consuming items | When demand is specified |
-| **`RoadSegment`** | Only if roads gain per-segment stats (tolls, capacity) | Probably never — keep as tile kind |
-| **`Contract`** | Standing supply agreements | Later content |
-| **`Tech` / `Modifier`** | Buffs on actors/parcels/buildings | After core economy works |
-
-**Recommendation:** next content step is expanding `items.yaml` + `production_methods.yaml` (and maybe `buildings.yaml` → `BuildingDefinition`). Spatial + actor systems are enough for now.
+See `data/README.md` for how to extend YAML content.

@@ -7,8 +7,9 @@ from enum import Enum
 from typing import Iterator
 
 from company_sim.actors import City
+from company_sim.buildings import Building
 from company_sim.items import Inventory
-from company_sim.plots import Building, BuildingType, Parcel, Plot, PlotType
+from company_sim.plots import Parcel, Plot, PlotType
 
 
 class TileKind(str, Enum):
@@ -287,7 +288,7 @@ def generate_map(
             center_x=x,
             center_y=y,
             population=pop,
-            inventory=Inventory({"materials": 20, "goods": 0}),
+            inventory=Inventory({"iron": 20, "coal": 20, "energy": 20}),
         )
 
     for tile in grid.tiles:
@@ -353,7 +354,5 @@ __all__ = [
     "generate_map",
     "Plot",
     "PlotType",
-    "Building",
-    "BuildingType",
     "Parcel",
 ]

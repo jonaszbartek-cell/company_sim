@@ -1,10 +1,17 @@
+# Editable game content — Production methods (recipes)
+# Add a method by appending under `production_methods:`.
+# `inputs` / `outputs` keys must match item ids from items.yaml.
+# `building_id` must match a building in buildings.yaml.
+
 production_methods:
-  - id: basic_goods
-    name: Basic Goods
-    inputs:
-      materials: 1
-    outputs:
-      goods: 1
+  - id: make_steel
+    name: Make Steel
+    description: Smelt iron with coal and energy into steel
+    building_id: foundry
     duration_sec: 5
-    allowed_building_types:
-      - workshop
+    inputs:
+      iron: 1
+      coal: 1
+      energy: 1
+    outputs:
+      steel: 1

@@ -166,7 +166,7 @@ class AIScheduler:
             if t.plot and t.plot.building is None and city.cash >= 200:
                 try:
                     world.build_building("city", city.id, t.x, t.y)
-                    self.last_thought = f"{city.name}: built municipal workshop at ({t.x},{t.y})"
+                    self.last_thought = f"{city.name}: built foundry at ({t.x},{t.y})"
                     return
                 except Exception as exc:  # noqa: BLE001
                     self.last_thought = f"{city.name}: build failed ({exc})"

@@ -14,13 +14,12 @@ class Item:
     """
     A tradable / storable good used as production input or output.
 
-    Definitions are data-driven (see data/items.yaml). Runtime inventories
-    store quantities by item id — they do not clone Item objects per stack.
+    Add entries in data/items.yaml — inventories reference items by id.
     """
 
     id: str
     name: str
-    category: str = "general"  # e.g. raw, intermediate, finished, service
+    category: str = "general"
     description: str = ""
     stackable: bool = True
 
@@ -36,7 +35,7 @@ class Item:
 
 @dataclass
 class Inventory:
-    """Quantity map keyed by Item.id, with validation helpers."""
+    """Quantity map keyed by Item.id."""
 
     quantities: dict[str, int] = field(default_factory=dict)
 
@@ -76,8 +75,6 @@ class Inventory:
 
 
 class ItemCatalog:
-    """Registry of Item definitions."""
-
     def __init__(self, items: dict[str, Item] | None = None) -> None:
         self._items: dict[str, Item] = dict(items or {})
 
@@ -93,6 +90,8 @@ class ItemCatalog:
                 description=row.get("description", ""),
                 stackable=bool(row.get("stackable", True)),
             )
+            if item.id in items:
+                raise ValueError(f"Duplicate item id in {path}: {item.id}")
             items[item.id] = item
         return cls(items)
 
@@ -126,10 +125,11 @@ def load_default_catalog() -> ItemCatalog:
     path = default_items_path()
     if path.exists():
         return ItemCatalog.from_yaml(path)
-    # Minimal fallback if data file missing
     return ItemCatalog(
         {
-            "materials": Item(id="materials", name="Materials", category="raw"),
-            "goods": Item(id="goods", name="Goods", category="finished"),
+            "iron": Item(id="iron", name="Iron", category="raw"),
+            "coal": Item(id="coal", name="Coal", category="raw"),
+            "energy": Item(id="energy", name="Energy", category="utility"),
+            "steel": Item(id="steel", name="Steel", category="processed"),
         }
     )

@@ -6,10 +6,10 @@ from dataclasses import dataclass, field
 
 from company_sim.actions import ActionError, ActionResult
 from company_sim.actors import Actor, ActorKind, Company
-from company_sim.items import Inventory, ItemCatalog, load_default_catalog
+from company_sim.buildings import Building
+from company_sim.content import GameContent
+from company_sim.items import Inventory
 from company_sim.map_grid import GridMap, TileKind, generate_map
-from company_sim.plots import Building, BuildingType
-from company_sim.production import ProductionCatalog, load_default_production
 
 
 @dataclass
@@ -24,23 +24,37 @@ class WorldConfig:
     road_build_cost: int = 50  # PLACEHOLDER
 
 
+def _starter_inventory() -> Inventory:
+    return Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0})
+
+
 @dataclass
 class World:
     config: WorldConfig
     grid: GridMap
-    items: ItemCatalog
-    production: ProductionCatalog
+    content: GameContent
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
     time_sec: float = 0.0
     paused: bool = False
     tick_index: int = 0
 
+    @property
+    def items(self):
+        return self.content.items
+
+    @property
+    def buildings(self):
+        return self.content.buildings
+
+    @property
+    def production(self):
+        return self.content.production
+
     @classmethod
     def new_game(cls, config: WorldConfig | None = None) -> World:
         config = config or WorldConfig()
-        items = load_default_catalog()
-        production = load_default_production(items)
+        content = GameContent.load()
 
         seeds = [
             ("city_a", "Northport", 8, 6, 800),
@@ -56,14 +70,14 @@ class World:
             city_seeds=seeds,
             road_stride=config.road_stride,
         )
-        world = cls(config=config, grid=grid, items=items, production=production)
+        world = cls(config=config, grid=grid, content=content)
 
         player = Company(
             id="player",
             name="Player Co",
             is_player=True,
             cash=config.player_starting_cash,
-            inventory=Inventory({"materials": 40, "goods": 5}),
+            inventory=_starter_inventory(),
         )
         world.companies[player.id] = player
         world.player_company_id = player.id
@@ -76,10 +90,11 @@ class World:
                 name=f"Rival {i+1}",
                 is_player=False,
                 cash=1500,
-                inventory=Inventory({"materials": 15, "goods": 0}),
+                inventory=Inventory({"iron": 10, "coal": 10, "energy": 10, "steel": 0}),
             )
 
         for city in grid.cities.values():
+            city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
             world._assign_starter_plot("city", city.id, near=(city.center_x, city.center_y))
 
         return world
@@ -161,11 +176,12 @@ class World:
                 actor = self.get_actor(b.owner_kind, b.owner_id)
             except (ActionError, KeyError):
                 continue
+            if method.building_id != b.building_id:
+                continue
             bonus = self.grid.production_bonus_for_plot(tile.plot)
             b.progress += (dt / method.duration_sec) * bonus
             while b.progress >= 1.0:
                 if not actor.inventory.has(method.inputs):
-                    # Stall progress at 1.0 until inputs available
                     b.progress = 1.0
                     break
                 actor.inventory.consume(method.inputs)
@@ -197,7 +213,7 @@ class World:
         owner_id: str,
         x: int,
         y: int,
-        building_type: BuildingType = BuildingType.WORKSHOP,
+        building_id: str = "foundry",
     ) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
@@ -207,23 +223,30 @@ class World:
             raise ActionError("You do not own this plot")
         if tile.plot.building is not None:
             raise ActionError("Plot already has a building")
-        cost = 200  # PLACEHOLDER
-        if actor.cash < cost:
+        try:
+            bdef = self.buildings.get(building_id)
+        except KeyError as exc:
+            raise ActionError(f"Unknown building: {building_id}") from exc
+        if not bdef.allows_plot_type(tile.plot.plot_type):
+            raise ActionError(f"{bdef.name} cannot be built on {tile.plot.plot_type.value} plots")
+        if actor.cash < bdef.build_cost:
             raise ActionError("Not enough cash")
-        # Default method: first allowed for this building type
-        method_id = None
-        for method in self.production.all():
-            if building_type.value in method.allowed_building_types:
-                method_id = method.id
-                break
-        actor.cash -= cost
+
+        methods = self.content.methods_for_building(building_id)
+        method_id = methods[0].id if methods else None
+
+        actor.cash -= bdef.build_cost
         tile.plot.building = Building(
-            building_type=building_type,
+            building_id=building_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
             production_method_id=method_id,
         )
-        return ActionResult(True, f"Built {building_type.value} at ({x},{y})", {"cost": cost})
+        return ActionResult(
+            True,
+            f"Built {bdef.name} at ({x},{y})",
+            {"cost": bdef.build_cost, "building_id": building_id, "production_method_id": method_id},
+        )
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int) -> ActionResult:
         actor = self.get_actor(actor_kind, actor_id)
@@ -270,7 +293,6 @@ class World:
             "paused": self.paused,
             "player_company_id": self.player_company_id,
             "companies": [c.to_public_dict() for c in self.companies.values()],
-            "items": self.items.to_public_dict(),
-            "production_methods": self.production.to_public_dict(),
+            "content": self.content.to_public_dict(),
             "map": self.grid.to_public_dict(),
         }

@@ -1,0 +1,14 @@
+# Editable game content — Buildings
+# Add a building by appending under `buildings:`.
+# Production methods that set building_id to this id can run here.
+# `build_cost` is paid in cash when constructed on an owned plot.
+
+buildings:
+  - id: foundry
+    name: Foundry
+    description: Industrial building that smelts steel
+    build_cost: 200
+    # Optional: restrict which plot types may host this building
+    allowed_plot_types:
+      - standard
+      - specialized

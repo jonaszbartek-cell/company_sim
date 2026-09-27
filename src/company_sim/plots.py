@@ -1,4 +1,4 @@
-"""Plots, buildings, and parcels on the map."""
+"""Plots and parcels on the map. Buildings live in company_sim.buildings."""
 
 from __future__ import annotations
 
@@ -6,42 +6,18 @@ from dataclasses import dataclass, field
 from enum import Enum
 import uuid
 
+from company_sim.buildings import Building
+
 
 class PlotType(str, Enum):
     STANDARD = "standard"
     SPECIALIZED = "specialized"
 
 
-class BuildingType(str, Enum):
-    # PLACEHOLDER catalog — expand via data later
-    WORKSHOP = "workshop"
-    WAREHOUSE = "warehouse"
-
-
-@dataclass
-class Building:
-    """A structure on a plot that can run a production method."""
-
-    building_type: BuildingType
-    owner_kind: str  # "company" | "city"
-    owner_id: str
-    production_method_id: str | None = None
-    progress: float = 0.0  # 0..1 toward next batch
-
-    def to_public_dict(self) -> dict:
-        return {
-            "building_type": self.building_type.value,
-            "owner_kind": self.owner_kind,
-            "owner_id": self.owner_id,
-            "production_method_id": self.production_method_id,
-            "progress": self.progress,
-        }
-
-
 @dataclass
 class Plot:
     """
-    A buyable land cell. May hold one building.
+    A buyable land cell. May hold one Building instance.
 
     Multiple adjacent owned plots can join a Parcel for bonuses.
     Grid coordinates live on the Tile that contains this Plot.
