@@ -134,12 +134,18 @@ Every state-changing action calls `persistence.save_all` so files stay current.
 | `saves/agents/<id>.txt` | that agent's cash/inventory/plots + open listings + mail contact list | other agents' private state |
 | `saves/mailboxes/<a>__<b>.txt` | shared thread for that unordered pair only | unrelated pairs |
 
-### Mail
+### Trading
 
-On startup, generate **C(n,2)** mailbox files for all agents (player + AI companies + cities).  
-LLM/player tools: `list_contacts`, `read_mail`, `send_message` → World Action API → append to the pair file.
+| Action | Goods | Cash |
+|--------|-------|------|
+| Market sell | Leave seller → market inventory + indexed listing | Moves only when filled |
+| Retract sell | That listing’s remaining goods → owner only | — |
+| Market buy order | On fill from sells at ≤ buy price | Escrowed on post; refund if fill cheaper |
+| Standard buy | From lowest sell listings now | Paid immediately |
+| Direct sell proposal | Reserved from proposer | On accept: buyer → seller |
+| Direct buy proposal | On accept: seller → buyer | Reserved from proposer; paid on accept |
 
-`min_seconds_between_turns` slows the wall clock between AI turns; it never compresses a day.
+`saves/proposals.txt` holds pending direct proposals.
 
 ---
 

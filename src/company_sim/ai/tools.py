@@ -153,7 +153,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "buy_from_market",
-            "description": "Buy goods now from the lowest-price sell listings.",
+            "description": "Standard buy: take goods now from lowest-price sell listings.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -161,6 +161,102 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "quantity": {"type": "integer"},
                 },
                 "required": ["item_id", "quantity"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "retract_sell",
+            "description": "Retract your sell listing; remaining goods return only to you.",
+            "parameters": {
+                "type": "object",
+                "properties": {"listing_id": {"type": "integer"}},
+                "required": ["listing_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "retract_buy",
+            "description": "Retract your buy listing; remaining escrowed cash returns to you.",
+            "parameters": {
+                "type": "object",
+                "properties": {"listing_id": {"type": "integer"}},
+                "required": ["listing_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_sell",
+            "description": "Direct sell proposal to another agent (goods reserved until accept/reject).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["to", "item_id", "quantity", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_buy",
+            "description": "Direct buy proposal to another agent (cash reserved until accept/reject).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["to", "item_id", "quantity", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_proposals",
+            "description": "List pending direct proposals involving you.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accept_proposal",
+            "description": "Accept a direct proposal addressed to you.",
+            "parameters": {
+                "type": "object",
+                "properties": {"proposal_id": {"type": "integer"}},
+                "required": ["proposal_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_proposal",
+            "description": "Reject (recipient) or cancel (proposer) a pending direct proposal.",
+            "parameters": {
+                "type": "object",
+                "properties": {"proposal_id": {"type": "integer"}},
+                "required": ["proposal_id"],
                 "additionalProperties": False,
             },
         },
@@ -429,6 +525,48 @@ class ToolExecutor:
 
         if name == "buy_from_market":
             r = self.world.buy_from_market(kind, aid, str(args["item_id"]), int(args["quantity"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "retract_sell":
+            r = self.world.retract_sell(kind, aid, int(args["listing_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "retract_buy":
+            r = self.world.retract_buy(kind, aid, int(args["listing_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "propose_sell":
+            r = self.world.propose_sell(
+                kind,
+                aid,
+                str(args["to"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+                int(args["price"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "propose_buy":
+            r = self.world.propose_buy(
+                kind,
+                aid,
+                str(args["to"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+                int(args["price"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "list_proposals":
+            r = self.world.list_proposals(kind, aid)
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "accept_proposal":
+            r = self.world.accept_proposal(kind, aid, int(args["proposal_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "reject_proposal":
+            r = self.world.reject_proposal(kind, aid, int(args["proposal_id"]))
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_road":

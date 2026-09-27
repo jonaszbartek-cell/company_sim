@@ -1,4 +1,12 @@
-"""Shared market: indexed buy/sell listings + escrow inventory."""
+"""Shared market: indexed buy/sell listings + escrow inventory.
+
+Invariants (no duplicate goods / no phantom cash):
+  - Sum of open sell-listing quantities for an item == market.inventory[item]
+  - Sell: goods leave the seller immediately; cash moves only on fill
+  - Buy order: cash escrowed immediately; goods move on fill
+  - Retract sell: only that listing's remaining goods return to that owner
+  - Retract buy: remaining escrow returns to that buyer
+"""
 
 from __future__ import annotations
 
@@ -22,6 +30,9 @@ class Listing:
     owner_kind: str  # "company" | "city"
     owner_id: str
 
+    def owned_by(self, kind: str, actor_id: str) -> bool:
+        return self.owner_kind == kind and self.owner_id == actor_id
+
     def to_public_dict(self) -> dict:
         return {
             "id": self.id,
@@ -43,16 +54,6 @@ class Listing:
 
 @dataclass
 class Market:
-    """
-    Central board.
-
-    Sell orders: goods move into market inventory immediately; cash pays the
-    seller when a buyer takes the listing (lowest price first).
-
-    Buy orders: cash is escrowed on the market; filled automatically against
-    cheapest matching sells (sell.price <= buy.price).
-    """
-
     inventory: Inventory = field(default_factory=Inventory)
     escrow_cash: dict[str, int] = field(default_factory=dict)  # "kind:id" → reserved cash
     listings: dict[int, Listing] = field(default_factory=dict)
@@ -102,6 +103,21 @@ class Market:
             self.escrow_cash[key] = left
         return True
 
+    def sell_qty_on_book(self, item_id: str) -> int:
+        return sum(L.quantity for L in self.listings.values() if L.side == "sell" and L.item_id == item_id)
+
+    def assert_inventory_matches_sells(self) -> None:
+        """Fail if pooled market inventory drifts from open sell listings."""
+        items = {L.item_id for L in self.listings.values() if L.side == "sell"}
+        items.update(self.inventory.as_dict().keys())
+        for item_id in items:
+            book = self.sell_qty_on_book(item_id)
+            have = self.inventory.get(item_id)
+            if book != have:
+                raise RuntimeError(
+                    f"Market inventory mismatch for {item_id}: listings={book} inventory={have}"
+                )
+
     def to_public_dict(self) -> dict:
         sells = sorted(
             (L for L in self.listings.values() if L.side == "sell"),
@@ -121,7 +137,6 @@ class Market:
         }
 
     def to_text(self) -> str:
-        """Raw market text (persistence may wrap with file: header)."""
         lines = [
             "=== MARKET ===",
             f"inventory: {self.inventory.as_dict() or '{}'}",
