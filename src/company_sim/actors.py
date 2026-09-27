@@ -1,4 +1,11 @@
-"""Shared economic actors: City and Company share the same core behavior."""
+"""Shared economic actors: City and Company share the same core behavior.
+
+Agent fields (your list + gaps we need):
+  id, cash, inventory, plots (owned via world)
+  + name, kind, acted_this_day (day scheduling)
+  Company also: is_player
+  City also: center, population, territory
+"""
 
 from __future__ import annotations
 
@@ -23,10 +30,17 @@ class Actor:
     name: str
     cash: int = 1000
     inventory: Inventory = field(default_factory=Inventory)
+    acted_this_day: bool = False
 
     @property
     def kind(self) -> ActorKind:
         raise NotImplementedError
+
+    def mark_acted(self) -> None:
+        self.acted_this_day = True
+
+    def reset_day(self) -> None:
+        self.acted_this_day = False
 
     def to_public_dict(self) -> dict:
         return {
@@ -35,6 +49,7 @@ class Actor:
             "kind": self.kind,
             "cash": self.cash,
             "inventory": self.inventory.as_dict(),
+            "acted_this_day": self.acted_this_day,
         }
 
 

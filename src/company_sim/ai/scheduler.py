@@ -1,15 +1,18 @@
-"""AI scheduler: one LLM worker, many Actor minds; heuristic fallback."""
+"""AI scheduler: sequential LLM agent turns (one mind at a time).
+
+One game day advances when all companies have acted (see World.note_actor_action).
+Turns can be slowed via min_seconds_between_turns — never sped up past that floor.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import itertools
 import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from company_sim.actors import Actor, City
-from company_sim.ai.llm_client import LLMClient, LLMConfig, parse_tool_calls
+from company_sim.ai.llm_client import LLMClient, parse_tool_calls
 from company_sim.ai.tools import (
     TOOL_DEFINITIONS,
     ToolExecutor,
@@ -26,16 +29,14 @@ log = logging.getLogger(__name__)
 @dataclass
 class AIScheduler:
     """
-    Round-robin across AI companies + cities.
+    Engine loop: LLM acts as current AI agent → when finished, next agent.
 
-    If local LLM is enabled and reachable, one decision runs at a time (async thread).
-    Otherwise uses the heuristic policy so the game stays playable.
+    Before each decision, world/market/agent text files are refreshed so the
+    model prompt can load the three-file bundle for that company/city.
     """
 
-    decision_interval_sec: float = 8.0
     llm: LLMClient = field(default_factory=LLMClient)
-    _last_decision_at: dict[str, float] = field(default_factory=dict)
-    _entity_cycle: itertools.cycle | None = None
+    _last_turn_wall: float = -999.0
     last_thought: str = "AI idle"
     busy: bool = False
     llm_mode: str = "unknown"  # off | online | fallback
@@ -52,29 +53,25 @@ class AIScheduler:
             self.llm_mode = "fallback"
             self.last_thought = "LLM enabled but unreachable — using heuristic"
 
-    def ensure_entities(self, world: World) -> None:
-        tokens = [f"{a.kind}:{a.id}" for a in world.iter_ai_actors()]
-        self._entity_cycle = itertools.cycle(tokens) if tokens else None
-
     def update(self, world: World) -> None:
-        """Non-blocking. Called every sim tick from the asyncio loop."""
+        """Non-blocking. Called from the asyncio UI loop."""
         if world.paused or self.busy:
             return
-        self.ensure_entities(world)
-        if self._entity_cycle is None:
+        actor = world.current_turn_actor()
+        if actor is None:
             return
 
-        token = next(self._entity_cycle)
-        last = self._last_decision_at.get(token, -999.0)
-        if world.time_sec - last < self.decision_interval_sec:
+        # Slow-down floor only (cannot speed past config.min_seconds_between_turns)
+        min_gap = max(0.0, world.config.min_seconds_between_turns)
+        if world.time_sec - self._last_turn_wall < min_gap:
             return
-        self._last_decision_at[token] = world.time_sec
 
-        kind, entity_id = token.split(":", 1)
-        try:
-            actor = world.get_actor(kind, entity_id)
-        except Exception:  # noqa: BLE001
+        # Skip AI mind if this agent already acted this day (wait for others / day roll)
+        if actor.acted_this_day:
+            world.advance_ai_turn()
             return
+
+        self._last_turn_wall = world.time_sec
 
         if self.llm_mode == "online" or (
             self.llm.config.enabled and self.llm_mode != "off" and self.llm.available()
@@ -86,10 +83,21 @@ class AIScheduler:
                 self._loop_task = loop.create_task(self._llm_decide(world, actor))
             except RuntimeError:
                 self.busy = False
-                self._heuristic(world, actor)
+                self._run_heuristic_turn(world, actor)
             return
 
-        self._heuristic(world, actor)
+        self._run_heuristic_turn(world, actor)
+
+    def _run_heuristic_turn(self, world: World, actor: Actor) -> None:
+        try:
+            context = world.persistence.load_context_for_agent(world, actor)
+            log.debug("Agent context loaded (%d chars) for %s", len(context), actor.id)
+            self._heuristic(world, actor)
+        finally:
+            if not actor.acted_this_day:
+                world.pass_turn(actor.kind, actor.id)
+            world.persistence.save_all(world)
+            world.advance_ai_turn()
 
     async def _llm_decide(self, world: World, actor: Actor) -> None:
         try:
@@ -101,12 +109,21 @@ class AIScheduler:
             self._heuristic(world, actor)
             self.last_thought = f"{actor.name}: LLM fail → heuristic ({exc})"
         finally:
+            if not actor.acted_this_day:
+                try:
+                    world.pass_turn(actor.kind, actor.id)
+                except Exception:  # noqa: BLE001
+                    actor.mark_acted()
+            world.persistence.save_all(world)
+            world.advance_ai_turn()
             self.busy = False
 
     def _run_llm_session(self, world: World, actor: Actor) -> str:
+        # Refresh text files; feed world + market + this agent into the prompt
+        file_bundle = world.persistence.load_context_for_agent(world, actor)
         executor = ToolExecutor(world, actor)
         system = system_prompt_for(actor)
-        user = build_actor_context(world, actor)
+        user = file_bundle + "\n" + build_actor_context(world, actor)
         messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
 
         for _ in range(self.llm.config.max_tool_rounds):
@@ -131,7 +148,6 @@ class AIScheduler:
                 }
                 if call_id:
                     tool_msg["tool_call_id"] = call_id
-                # Ollama also accepts name on tool messages
                 tool_msg["name"] = name
                 messages.append(tool_msg)
                 if name == "done":
@@ -172,23 +188,7 @@ class AIScheduler:
                     self.last_thought = f"{city.name}: build failed ({exc})"
                     return
 
-        candidates = self._road_candidates_near(world, city.center_x, city.center_y, radius=8)
-        candidates.sort(
-            key=lambda p: (
-                0 if world.grid.get(p[0], p[1]).city_id == city.id else 1,
-                -(abs(p[0] - city.center_x) + abs(p[1] - city.center_y)),
-            )
-        )
-        if candidates and city.cash >= world.config.road_build_cost:
-            x, y = candidates[0]
-            try:
-                world.city_build_road(city.id, x, y)
-                self.last_thought = f"{city.name}: built road at ({x},{y})"
-                return
-            except Exception as exc:  # noqa: BLE001
-                self.last_thought = f"{city.name}: road failed ({exc})"
-                return
-
+        # Prefer selling surplus steel / buying missing inputs later — for now claim land
         for t in world.grid.tiles:
             if (
                 t.kind.value == "plot"
@@ -205,10 +205,71 @@ class AIScheduler:
                     self.last_thought = f"{city.name}: claim failed ({exc})"
                     return
 
-        self.last_thought = f"{city.name}: administering territory ({len(city.territory)} cells)"
+        candidates = self._road_candidates_near(world, city.center_x, city.center_y, radius=8)
+        if candidates and city.cash >= world.config.road_build_cost:
+            x, y = candidates[0]
+            try:
+                world.city_build_road(city.id, x, y)
+                self.last_thought = f"{city.name}: built road at ({x},{y})"
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.last_thought = f"{city.name}: road failed ({exc})"
+                return
+
+        self.last_thought = f"{city.name}: administering (day {world.day})"
 
     def _heuristic_company(self, world: World, company: Actor) -> None:
         owned = world.owned_plots("company", company.id)
+
+        # Produce if we have a foundry + inputs
+        for t in owned:
+            b = t.plot.building if t.plot else None
+            if not b or not b.production_method_id:
+                continue
+            try:
+                method = world.production.get(b.production_method_id)
+            except KeyError:
+                continue
+            if company.inventory.has(method.inputs):
+                try:
+                    world.produce("company", company.id, t.x, t.y)
+                    self.last_thought = f"{company.name}: produced {method.id}"
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self.last_thought = f"{company.name}: produce failed ({exc})"
+                    break
+
+        # Sell steel if any
+        steel = company.inventory.get("steel")
+        if steel >= 1:
+            try:
+                world.post_sell("company", company.id, "steel", min(steel, 3), price=40)
+                self.last_thought = f"{company.name}: posted steel sell"
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.last_thought = f"{company.name}: sell failed ({exc})"
+
+        # Buy cheapest missing input from market
+        for item_id in ("iron", "coal", "energy"):
+            if company.inventory.get(item_id) < 3:
+                try:
+                    world.buy_from_market("company", company.id, item_id, 2)
+                    self.last_thought = f"{company.name}: bought {item_id}"
+                    return
+                except Exception:
+                    continue
+
+        # Build on empty owned plot
+        for t in owned:
+            if t.plot and t.plot.building is None and company.cash >= 200:
+                try:
+                    world.build_building("company", company.id, t.x, t.y)
+                    self.last_thought = f"{company.name}: built foundry at ({t.x},{t.y})"
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self.last_thought = f"{company.name}: build failed ({exc})"
+                    return
+
         if not owned:
             unowned = [
                 t
@@ -223,41 +284,10 @@ class AIScheduler:
                 t = unowned[0]
                 try:
                     world.buy_plot("company", company.id, t.x, t.y)
-                    if company.cash >= 200:
-                        world.build_building("company", company.id, t.x, t.y)
                     self.last_thought = f"{company.name}: bought at ({t.x},{t.y})"
                     return
                 except Exception as exc:  # noqa: BLE001
                     self.last_thought = f"{company.name}: buy failed ({exc})"
                     return
 
-        if owned and company.cash >= world.config.road_build_cost:
-            ox, oy = owned[0].x, owned[0].y
-            candidates = self._road_candidates_near(world, ox, oy, radius=5)
-            if candidates:
-                x, y = candidates[0]
-                try:
-                    world.company_build_road(company.id, x, y)
-                    self.last_thought = f"{company.name}: built road at ({x},{y})"
-                    return
-                except Exception as exc:  # noqa: BLE001
-                    self.last_thought = f"{company.name}: road failed ({exc})"
-
-        for t in owned:
-            for nx, ny in world.grid.neighbors4(t.x, t.y):
-                n = world.grid.get(nx, ny)
-                if (
-                    n.kind.value == "plot"
-                    and n.plot
-                    and n.plot.owner_kind == "company"
-                    and n.plot.owner_id == company.id
-                    and n.plot.parcel_id != t.plot.parcel_id
-                ):
-                    try:
-                        world.merge_plots("company", company.id, t.x, t.y, nx, ny)
-                        self.last_thought = f"{company.name}: merged plots"
-                        return
-                    except Exception:
-                        pass
-
-        self.last_thought = f"{company.name}: holding"
+        self.last_thought = f"{company.name}: holding (day {world.day})"

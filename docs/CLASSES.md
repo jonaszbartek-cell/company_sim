@@ -3,42 +3,43 @@
 ## Core loop
 
 ```text
-Plot (land)
-  └── Building instance (e.g. Foundry)   ← BuildingDefinition from data/buildings.yaml
-        └── ProductionMethod (e.g. Make Steel)  ← data/production_methods.yaml
-              uses Item ids (iron, coal, energy → steel)  ← data/items.yaml
+Agent (Company | City)
+  cash, inventory, acted_this_day
+  └── owned Plots (via world)
+        └── Building (idle|working, chosen production method)
+              └── ProductionMethod → Items
 
-Actor (Company | City)
-  └── Inventory of Items
+Market
+  inventory + indexed buy/sell Listings
 ```
 
 ## Implemented
 
-| Class | Role | Data file |
-|-------|------|-----------|
-| `Actor` / `Company` / `City` | Economic agents | — |
-| `Item` + `ItemCatalog` | Goods | `data/items.yaml` |
-| `Inventory` | Stock by item id | — |
-| `BuildingDefinition` + `BuildingCatalog` | Buildable types | `data/buildings.yaml` |
-| `Building` | Instance on a plot | — |
-| `ProductionMethod` + catalog | Recipes | `data/production_methods.yaml` |
-| `Plot` / `Parcel` | Land + merge bonuses | — |
-| `GameContent` | Loads + validates all YAML | `data/*` |
-| `Tile` / `GridMap` | Spatial grid | — |
+| Class | Role | Notes |
+|-------|------|-------|
+| `Actor` / `Company` / `City` | Agents | 1 player + 2 AI cos + 1 city |
+| `Item` + catalog | Goods | `data/items.yaml` |
+| `Inventory` | Stock by item id | agents + market |
+| `BuildingDefinition` + `Building` | Types / instances | status idle\|working |
+| `ProductionMethod` | Recipes | `data/production_methods.yaml` |
+| `Plot` / `Parcel` | Land + merge size | location on Tile `(x,y)` |
+| `Market` / `Listing` | Indexed orders | lowest-price buys |
+| `GamePersistence` | Text saves | world / market / agents/* |
+| `World` | Day loop + actions | |
+| `GameContent` | YAML load + validate | |
 
-## Seed content (now)
+## Seed content
 
 - Items: **iron, coal, energy, steel**
 - Building: **foundry**
 - Method: **make_steel** (1+1+1 → 1 steel)
 
-## Suggested later (not built yet)
+## Later
 
 | Class | When |
 |-------|------|
-| `TradeOffer` / `Trade` | Direct trading |
-| `Market` | Shared buy/sell board |
-| Population / demand basket | City consumption |
-| `Contract` | Standing supply deals |
+| `Contract` / negotiate | Direct deals between agents |
+| Population demand | City consumption |
+| Specialized plot bonuses | |
 
-See `data/README.md` for how to extend YAML content.
+See `data/README.md` for extending YAML content.

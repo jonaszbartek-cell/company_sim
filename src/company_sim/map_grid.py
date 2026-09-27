@@ -90,7 +90,12 @@ class GridMap:
             if n.kind != TileKind.EMPTY:
                 continue
             n.kind = TileKind.PLOT
-            n.plot = Plot(plot_type=self._choose_plot_type(nx, ny), price=self._plot_price(nx, ny))
+            price = self._plot_price(nx, ny)
+            n.plot = Plot(
+                plot_type=self._choose_plot_type(nx, ny),
+                price=price,
+                value=price,
+            )
             if n.city_id is None:
                 n.city_id = self._nearest_city_id(nx, ny)
 
@@ -313,9 +318,11 @@ def generate_map(
         if tile.kind != TileKind.EMPTY:
             continue
         tile.kind = TileKind.PLOT
+        price = grid._plot_price(tile.x, tile.y)
         tile.plot = Plot(
             plot_type=grid._choose_plot_type(tile.x, tile.y),
-            price=grid._plot_price(tile.x, tile.y),
+            price=price,
+            value=price,
         )
 
     grid.ensure_all_plots_have_road_access()
@@ -323,9 +330,11 @@ def generate_map(
         if tile.kind == TileKind.EMPTY:
             if grid.is_road_access(tile.x, tile.y):
                 tile.kind = TileKind.PLOT
+                price = grid._plot_price(tile.x, tile.y)
                 tile.plot = Plot(
                     plot_type=grid._choose_plot_type(tile.x, tile.y),
-                    price=grid._plot_price(tile.x, tile.y),
+                    price=price,
+                    value=price,
                 )
             else:
                 grid.set_road(tile.x, tile.y)
