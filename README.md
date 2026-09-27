@@ -1,7 +1,7 @@
 # company_sim
 
-AI-driven multi-agent geopolitical simulation game.
+Company economic simulator: production, goods, demand, a simplified city/population layer, and rival companies driven by a **local LLM** with tools (budget-PC friendly).
 
-**Design doc (draft):** [docs/DESIGN.md](docs/DESIGN.md)
+**Design doc:** [docs/DESIGN.md](docs/DESIGN.md)
 
-Current playtests still live in Google Drive (`01_WORLD_STATE`, `02_PROCEDURES`). This repo is the software engine that will replace the manual Doc workflow.
+Status: design phase — no game runtime yet. Stack and MVP decisions are listed in the design doc (§12).

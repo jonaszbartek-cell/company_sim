@@ -1,409 +1,386 @@
 # company_sim — Design Document
 
-**Status:** Draft v0.1  
+**Status:** Draft v0.2 (correct game concept)  
 **Date:** 2026-09-27  
-**Repo:** `jonaszbartek-cell/company_sim`  
-**Source of truth today:** Google Drive shared sim (`01_WORLD_STATE`, `02_PROCEDURES`)  
-**Drive mirror (summary):** https://docs.google.com/document/d/1Fed_YxfYqSoqpCEXZVdn8YJPHoMSefO5wuhrznvaq1E/edit
+**Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)  
+**Note:** v0.1 incorrectly described a geopolitical country sim. This version replaces it.
 
 ---
 
-## 1. Problem
+## 1. What we are building
 
-The geopolitical multi-agent simulation already runs, but it is operated by hand:
+A **company economic simulator**:
 
-- World state lives in Google Docs (`01_WORLD_STATE` snapshots).
-- Turn rules live in `02_PROCEDURES`.
-- Country agents negotiate in chat; the Owner approves; a World Governor agent recalculates and rewrites docs.
+- The player runs a company.
+- The economy has **goods**, **production methods**, and **demand**.
+- There is a **simplified city + population** layer that consumes goods and supplies labor.
+- **Competitor companies are controlled by a local LLM** that talks to the game engine through tools.
+- The LLM stack must run on a **budget PC** (local inference, no cloud required for AI rivals).
 
-That works for playtests, but it is slow, error-prone, hard to audit, and impossible to resume cleanly after mistakes. **company_sim** is the software product that turns this into a durable, rule-backed game engine with AI actors and a human Owner in the loop.
-
----
-
-## 2. Product vision
-
-An AI-driven turn-based geopolitical simulation where:
-
-1. **Owner (human)** picks who acts, approves/rejects packages, and issues special events.
-2. **World Governor (system + LLM adjudicator)** applies deterministic resource math and judges soft outcomes (ACTION / MILITARY).
-3. **Country agents (LLMs)** negotiate, propose TRADE / ACTION / MILITARY, and react to flags.
-
-MVP goal: run a full multi-country campaign with the same feel as the current Drive game, without manually editing world-state docs.
+This doc defines the technical and systems design so we can implement incrementally without inventing gameplay you have not specified yet.
 
 ---
 
-## 3. Current reference model (from live play)
+## 2. Design principles (from your master instructions)
 
-### 3.1 Roles
+1. Working and playable first.
+2. Simple, maintainable code.
+3. Easy to add/change mechanics and balance data.
+4. No overengineering.
+5. Do not invent gameplay beyond what you describe; mark open items explicitly.
+6. After each meaningful step, keep the project runnable.
 
-| Role | Who | Responsibility |
-|------|-----|----------------|
-| Owner | Human | Chooses next country; approve/reject actions; issue events (e.g. ESC food-shortage cut) |
-| World Governor | Engine + LLM | Turn-start calc; trade confirm; action/military resolution; flags; state updates |
-| Country | LLM agent per polity | Diplomacy, trade offers, action proposals |
+---
 
-### 3.2 Countries (current campaign)
+## 3. Player fantasy (high level)
 
-USA, EU, China, Russia, Iran, Israel (extendable).
+You manage a company in a small city economy: buy/hire inputs, choose production, sell goods into market demand shaped by population, and compete with other firms whose managers are local AI agents.
 
-Alliances / blocs observed in play: e.g. ESC (Iran / Russia / China) under shared events.
+Exact win/lose conditions, eras, and content lists are **not defined yet** and will come from later prompts.
 
-### 3.3 Per-country state schema
+---
+
+## 4. Core systems (planned)
+
+Systems below are the ones your brief implies. Detail and balance come later.
+
+### 4.1 Company
+
+A company owns:
+
+- Cash
+- Inventory of goods
+- Facilities / production lines (or equivalent capacity)
+- Employees (or labor contracts)
+- Orders / contracts (if/when added)
+- Identity used by AI or player (name, strategy notes)
+
+Player controls one company. Other companies are AI-controlled.
+
+### 4.2 Goods
+
+Goods are data-defined commodities (raw, intermediate, finished, possibly services later).
+
+Each good has at least:
+
+- `id`, display name
+- unit
+- whether it spoils / storage rules (later, if needed)
+- tags for demand and production
+
+Balance values live in data files, not buried in logic.
+
+### 4.3 Production methods
+
+A production method is a recipe:
+
+- inputs (goods + quantities per cycle)
+- labor requirement
+- outputs (goods + quantities)
+- time / throughput
+- required facility or tech (when those exist)
+
+The engine resolves production in discrete sim steps so results are deterministic and debuggable.
+
+### 4.4 Market demand & prices
+
+Simplified market:
+
+- Population (and maybe businesses) generate **demand** for consumer goods.
+- Companies offer **supply** from inventory / production.
+- Price emerges from a simple supply–demand rule (exact formula TBD with you).
+- Companies buy inputs from the same market or from direct trades (TBD).
+
+Assumption for MVP design: **one shared city market** with posted buy/sell interest, not a full order-book exchange.
+
+### 4.5 City & population (simplified)
+
+City is a light simulation, not a full city-builder:
+
+- Population count (and later maybe segments: workers, dependents)
+- Employment / unemployment
+- Wage pressure (optional early)
+- Consumption basket → demand for goods
+- Happiness / migration only if you later ask for it
+
+No district micro-management in MVP unless you request it. A single-city aggregate is enough to drive demand and labor.
+
+### 4.6 Time / simulation loop
+
+**Recommended default: turn-based (or tick-based) days.**
+
+Why: local LLMs are slow on budget PCs. Discrete turns let rival AIs think between turns instead of every frame, keep the economy deterministic, and make debugging possible.
+
+Alternative (only if you prefer): real-time with paused “AI decision windows.” Heavier and harder to keep fair on weak hardware.
+
+### 4.7 Competitor AI (local LLM + tools)
+
+Each rival company has an LLM agent with:
+
+- A short system prompt (role, goals, constraints)
+- A **small tool set** that talks only to the game engine
+- A compact state summary (not the whole world dump)
+
+Agents never mutate state directly. Tools request actions; the engine validates and applies them.
+
+---
+
+## 5. Local LLM on a budget PC
+
+### 5.1 Constraints we design for
+
+Assumption (adjust if your machine differs):
+
+- 8–16 GB system RAM
+- Integrated GPU or entry discrete GPU (or CPU-only)
+- No requirement for cloud API keys for rival AI
+
+### 5.2 Inference approach
+
+| Piece | Recommendation | Why |
+|-------|----------------|-----|
+| Runtime | [Ollama](https://ollama.com) or llama.cpp server | Simple local OpenAI-compatible HTTP API |
+| Model size | ~1.5B–7B params, Q4_K_M / Q5 quant | Fits budget RAM; tool use still workable |
+| Suggested starter models | Qwen2.5-3B-Instruct, Llama-3.2-3B-Instruct, Phi-3.5/4-mini (whichever tools best on your machine) | Small, instruct-tuned, OK JSON/tool habits |
+| Context | Tight summaries (few KB), not full history every call | Speed + quality on small models |
+| Scheduling | At most one AI company deciding at a time; queue others | Avoid RAM/CPU spikes |
+
+### 5.3 Tool design for small models
+
+Keep tools few, typed, and forgiving:
+
+Examples (names indicative, not final):
+
+1. `get_company_status` — cash, inventory, employees, facilities
+2. `get_market_overview` — prices, demand pressure, top goods
+3. `set_production` — choose method + intensity for a line
+4. `place_buy_order` / `place_sell_order` — market actions
+5. `hire_workers` / `fire_workers` — labor adjustments
+6. `get_rival_public_info` — public prices/production hints only
+
+Rules:
+
+- Engine rejects illegal actions with clear errors the model can read.
+- Prefer enums and numbers over free text for actions.
+- One decision bundle per turn (plan), not dozens of chatty calls.
+- Hard timeout + fallback: if the model fails/times out, company holds previous plan or uses a tiny scripted heuristic so the game never softlocks.
+
+### 5.4 Separation of concerns
 
 ```text
-Country
-├── military
-│   ├── technology: number
-│   ├── stockpiles: { ground, navy, air_missile, defense }
-│   └── production_per_turn: { ground, navy, air_missile, defense }
-└── economy
-    ├── cash, cash_income
-    ├── resources: { oil, energy, food, steel, electronics }
-    ├── income:     same keys /turn
-    └── expenditure: same keys /turn
+┌──────────────────┐     tools/HTTP      ┌─────────────────────┐
+│  Game Engine     │◄───────────────────►│  LLM Runner         │
+│  (sim + rules)   │                     │  (Ollama client)    │
+└────────┬─────────┘                     └──────────▲──────────┘
+         │                                          │
+         ▼                                          │
+┌──────────────────┐                     ┌──────────┴──────────┐
+│  Save / Data     │                     │  Local model files  │
+│  goods, recipes  │                     │  via Ollama/llama   │
+└──────────────────┘                     └─────────────────────┘
 ```
 
-Military stockpiles are **single-use**: spent units are removed when used. There is no reusable hardware inventory.
-
-### 3.4 Turn procedure (canonical)
-
-From `02_PROCEDURES`:
-
-1. Owner selects the acting country.
-2. Turn-start: `resources_new = resources_old + income − expenditure`; military stockpiles `+= production`.
-3. Persist updated country slice into world state.
-4. Country communicates with others.
-5. Country prepares package: **TRADE** (optional), **ACTION** (required intent), **MILITARY** (optional).
-6. Country reports package to Owner.
-7. Owner approves or rejects.
-8. If approved, Governor executes and updates world state.
-9. If any resource stockpile ≤ 0, Governor flags Owner.
-10. Wait for Owner to pick the next country.
-
-### 3.5 Sub-procedures
-
-**Trade**
-
-- Report: parties, resources both ways, cash amount, who pays.
-- Governor confirms with counterparty country agent.
-- On yes: transfer resources/cash; update both countries.
-
-**Action**
-
-- Free-text intent → Governor judges effectiveness (observed bands: WEAK / WEAK–MODERATE / MODERATE / HIGHLY EFFECTIVE).
-- Returns narrative + concrete state deltas (often income/infra tweaks, small stockpile recovery).
-- May affect actor and/or others.
-
-**Military**
-
-- Report: attacker, target, method, stockpiles spent.
-- Governor weighs attack type, spent force, attacker tech, defender stockpiles/defense, situation.
-- Spent attacker stockpiles always removed; defender damage / income hits / defense attrition as judged.
-
-### 3.6 Events & flags
-
-Owner may inject global modifiers (example: ESC food shortage → halve production and non-food income for ESC countries).
-
-Flags always surface stockpile ≤ 0 and other thin resources (Air 0, Cash thin, etc.).
+Game logic does not embed model weights. LLM is an optional AI driver behind the same action API the UI uses.
 
 ---
 
-## 4. Goals & non-goals
+## 6. Technical foundation (proposal)
 
-### Goals (MVP)
+Repo is currently empty aside from docs. We need a stack before code.
 
-- Structured world state (DB / JSON), versioned every settlement.
-- Deterministic turn-start resource & production math.
-- Owner console: pick turn, approve/reject, inject events.
-- Country agent loop with tool access to public state + private notes.
-- Governor pipeline: trade settlement, action resolution, military resolution.
-- Full audit log of every calc and LLM judgment.
-- Import path from existing Drive `01_WORLD_STATE` text into structured state.
+### 6.1 Recommended stack
 
-### Non-goals (MVP)
+| Layer | Choice | Rationale |
+|-------|--------|-----------|
+| Language | **TypeScript (Node)** or **Python 3.11+** | Fast to iterate; excellent for tool APIs and data files |
+| UI (MVP) | Simple **local web UI** (Vite + browser) or lightweight desktop shell later | Company sims are panel/table heavy; 3D engine not required for MVP |
+| Sim core | Pure deterministic module (no UI framework inside) | Easy tests; AI and UI both call the same API |
+| AI bridge | HTTP to Ollama (`/api/chat` with tools) | Standard, local, replaceable |
+| Data | JSON/YAML for goods, recipes, city presets | Balance without recompiling |
+| VCS | This GitHub repo | Already created — do not create another |
 
-- Real-time simultaneous turns.
-- Pixel map / 3D combat.
-- Open multiplayer matchmaking.
-- Perfect economic equilibrium modeling.
-- Fully autonomous Owner (human stays in the loop).
+**Assumption:** start with **TypeScript + Vite web UI + Node sim server** OR **Python + simple web UI**. Both are fine; see open decision A.
 
----
+**Not recommended for MVP:** Unity/Unreal (heavy), multiplayer netcode, cloud-only LLM dependency.
 
-## 5. System architecture
+### 6.2 Project layout (target)
 
 ```text
-┌──────────────────────────────────────────────────────────┐
-│                     Owner Console (Web)                   │
-│  pick turn · approve packages · events · view flags/log  │
-└───────────────┬───────────────────────────▲──────────────┘
-                │                           │
-                ▼                           │
-┌───────────────────────┐     ┌─────────────┴──────────────┐
-│     Turn Orchestrator │────▶│     World State Store      │
-│  FSM: idle→start→dip  │     │  countries, flags, events  │
-│  →propose→approve→    │     │  immutable turn snapshots  │
-│  settle→flag→idle     │     └─────────────▲──────────────┘
-└───────────┬───────────┘                   │
-            │                               │
-   ┌────────┴────────┐                      │
-   ▼                 ▼                      │
-┌────────────┐  ┌──────────────┐   ┌───────┴────────┐
-│ Country    │  │ World        │   │ Rules Engine   │
-│ Agents     │  │ Governor     │──▶│ (deterministic │
-│ (1 / nation│  │ (LLM + tools)│   │  resource math)│
-└────────────┘  └──────────────┘   └────────────────┘
+company_sim/
+  docs/DESIGN.md
+  data/                 # goods, production methods, city presets
+  src/
+    sim/                # economy, market, city, company, turn loop
+    ai/                 # LLM client, prompts, tool adapters
+    ui/                 # player panels
+    app/                # wire-up, save/load
+  tests/
+  README.md
 ```
 
-### 5.1 Turn orchestrator (FSM)
+Exact folder names can shift slightly with the chosen language.
 
-States: `IDLE` → `TURN_START` → `DIPLOMACY` → `PROPOSAL` → `OWNER_REVIEW` → `SETTLE` → `FLAGS` → `IDLE`
+### 6.3 Action API (shared by player UI and LLM)
 
-Illegal transitions rejected; every transition appends an audit event.
+All gameplay commands go through one validated action layer, e.g.:
 
-### 5.2 Rules engine (deterministic)
+- `StartNewGame(config)`
+- `AdvanceTurn()`
+- `CompanySetProduction(companyId, ...)`
+- `CompanyBuy(companyId, goodId, qty, maxPrice)`
+- `CompanySell(...)`
+- `CompanyHire(...)`
 
-Pure functions, no LLM:
-
-- Turn-start resource equation
-- Production accrual
-- Trade transfer (after both sides confirmed)
-- Stockpile ≤ 0 clamping + flag emission
-- Event modifiers (e.g. production multipliers)
-
-Unit-tested; golden fixtures from real Drive turns (EU settle 2026-09-26, China settle, ESC cut, etc.).
-
-### 5.3 World Governor (LLM + tools)
-
-LLM only where judgment is required:
-
-- ACTION effectiveness & deltas
-- MILITARY outcome
-- Optional: summarizing flags for Owner
-
-Constrained by tool schema: may only propose typed patches (`PatchOp[]`) that the rules engine validates before apply.
-
-### 5.4 Country agents
-
-Each country agent receives:
-
-- Public world snapshot (all countries’ public stats)
-- Own private scratchpad / doctrine
-- Recent turn log
-- Tools: `propose_trade`, `propose_action`, `propose_military`, `message_country`, `read_state`
-
-Agents cannot mutate state directly.
+Player UI and LLM tools are two front-ends to the same actions. That keeps AI honest and rules centralized.
 
 ---
 
-## 6. Data model (proposed)
+## 7. MVP scope (first playable)
 
-```ts
-type ResourceKey = "oil" | "energy" | "food" | "steel" | "electronics";
-type MilKey = "ground" | "navy" | "air_missile" | "defense";
+**MVP = one city, few goods, a handful of recipes, player company + 1–2 LLM rivals, turn advance, readable UI.**
 
-interface CountryState {
-  id: string;                 // "usa" | "eu" | ...
-  name: string;
-  military: {
-    technology: number;
-    stockpiles: Record<MilKey, number>;
-    production: Record<MilKey, number>;
-  };
-  economy: {
-    cash: number;
-    cashIncome: number;
-    resources: Record<ResourceKey, number>;
-    income: Record<ResourceKey, number>;
-    expenditure: Record<ResourceKey, number>;
-  };
-  notes?: string;
-  modifiers?: Modifier[];     // active event effects
-}
+Included:
 
-interface WorldState {
-  version: number;
-  turnIndex: number;
-  actingCountryId: string | null;
-  phase: TurnPhase;
-  countries: Record<string, CountryState>;
-  flags: Flag[];
-  policies: Policy[];         // e.g. food export locks
-  updatedAt: string;
-}
+1. New game → load data definitions
+2. Turn loop: production → market resolve → city consume/update → AI rivals decide → player acts (order TBD with you)
+3. Player can inspect market, inventory, cash, set production, buy/sell
+4. At least one local LLM rival using tools
+5. Save/load game state
+6. Fail-soft AI (timeout → hold)
 
-interface TurnSnapshot {
-  id: string;
-  label: string;              // "EU turn settled 2026-09-26"
-  before: WorldState;
-  after: WorldState;
-  package?: ActionPackage;
-  ownerDecision?: "approved" | "rejected";
-  governorReport?: string;
-  createdAt: string;
-}
+Excluded from MVP unless you ask:
 
-interface ActionPackage {
-  countryId: string;
-  trade?: TradeDeal[];
-  action?: { description: string };
-  military?: {
-    targetId: string;
-    method: string;
-    spent: Partial<Record<MilKey, number>>;
-  };
-}
+- Complex logistics / multi-city
+- Full 2D city map building
+- Deep politics / marketing / R&D trees
+- Multiplayer
+- Polished art
+
+---
+
+## 8. Data-driven content example (illustrative only)
+
+Illustrative shape — **not final game content**:
+
+```yaml
+goods:
+  - id: wheat
+  - id: flour
+  - id: bread
+  - id: labor   # or model labor separately
+
+production_methods:
+  - id: mill_flour
+    inputs: { wheat: 10, labor: 2 }
+    outputs: { flour: 8 }
+    duration_turns: 1
+  - id: bake_bread
+    inputs: { flour: 5, labor: 3 }
+    outputs: { bread: 6 }
+    duration_turns: 1
+
+city_preset:
+  population: 5000
+  base_demand:
+    bread: 0.4   # per capita factors, exact model TBD
 ```
 
-Storage: Postgres (or SQLite for local MVP) + JSONB for state blobs; append-only `turn_snapshots` and `audit_events`.
+Final goods/recipes wait for your content instructions.
 
 ---
 
-## 7. API surface (MVP)
+## 9. Implementation stages
 
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/world` | Current world state |
-| GET | `/world/history` | Snapshot list |
-| GET | `/world/history/:id` | One snapshot |
-| POST | `/turns/start` | Owner picks country → run turn-start calc |
-| POST | `/turns/package` | Country agent submits package |
-| POST | `/turns/decide` | Owner approve/reject |
-| POST | `/turns/settle` | Governor execute + persist |
-| POST | `/events` | Owner injects global event |
-| GET | `/flags` | Open flags |
-| WS/SSE | `/stream` | Live phase + log updates |
-
-Auth: single Owner account for MVP; agent calls use service tokens scoped to one country.
+| Stage | Deliverable | Playable? |
+|-------|-------------|-----------|
+| S0 | Design doc approved + stack chosen | n/a |
+| S1 | Sim core: goods, inventory, recipes, turn advance (no AI) | yes (debug/CLI or bare UI) |
+| S2 | Market + city demand/labor loop | yes |
+| S3 | Player UI for inspect + actions | yes |
+| S4 | Action API + LLM tool bridge + 1 rival | yes |
+| S5 | Save/load, AI queue polish, more data | yes |
+| S6+ | Content, balance, map/visuals per your prompts | yes |
 
 ---
 
-## 8. LLM design
+## 10. Testing approach
 
-### Country system prompt skeleton
-
-- You are the government of {COUNTRY}.
-- Optimize long-term survival and relative power under Owner oversight.
-- Never invent numbers not present in state; propose trades with exact integers.
-- Always include ACTION; TRADE recommended; MILITARY optional.
-- Report in structured JSON matching `ActionPackage`.
-
-### Governor system prompt skeleton
-
-- You are World Governor. Prefer conservative ACTION effects (production/income boosts are weak).
-- Military: force size + tech + defense → effectiveness band; always remove spent stockpiles.
-- Emit only validated `PatchOp`s; narrate briefly for the turn log.
-
-### Patch ops (examples)
-
-```ts
-type PatchOp =
-  | { op: "add_resource"; countryId: string; key: ResourceKey | "cash"; delta: number }
-  | { op: "set_income"; countryId: string; key: ResourceKey | "cash"; value: number }
-  | { op: "add_stockpile"; countryId: string; key: MilKey; delta: number }
-  | { op: "set_policy"; policy: Policy }
-  | { op: "add_flag"; flag: Flag }
-  | { op: "add_modifier"; countryId: string; modifier: Modifier };
-```
-
-Rules engine rejects patches that violate invariants (negative spends without stockpile, trade without confirmation, etc.).
+- Unit tests for market clearing, production consumption, turn order.
+- Fixture games with scripted (non-LLM) rival policies.
+- Manual playtest checklist per stage.
+- AI integration test: mock LLM responses → ensure tools apply correctly; optional live Ollama test when installed.
 
 ---
 
-## 9. UX (Owner console)
+## 11. Risks
 
-Minimal screens:
-
-1. **World board** — country cards with cash, critical resources, mil tech, flags.
-2. **Turn panel** — phase indicator, acting country, package JSON + natural-language summary, Approve / Reject.
-3. **Diplomacy feed** — inter-country messages for the active turn.
-4. **History** — snapshot timeline with diffs.
-5. **Events** — form to apply modifiers (name, targets, multipliers, duration).
-
-No card-heavy dashboard chrome; one composition per screen; board is the visual anchor.
+| Risk | Mitigation |
+|------|------------|
+| Small models ignore tools / invent illegal moves | Strict schema, retries, engine validation, heuristic fallback |
+| AI turns too slow | One rival per turn slice; smaller model; cached market summary |
+| Economy softlocks (no food, no labor) | Early warnings; MVP tunables in data; Owner/debug commands |
+| Scope creep into city-builder | Keep city aggregate until you explicitly expand |
 
 ---
 
-## 10. Migration from Drive
+## 12. Open decisions (need your input)
 
-1. Parser: ingest latest `01_WORLD_STATE` text → `WorldState` JSON.
-2. Fixture pack: store historical settle docs as golden tests for parser + turn-start math.
-3. Dual-run: for N turns, engine proposes updates; Owner compares to old Doc workflow.
-4. Cut over: engine becomes source of truth; optional export back to Doc for archive.
+These materially affect architecture. Please answer when you can:
 
-Drive links:
+**A. Stack preference**
 
-- Procedures: `https://docs.google.com/document/d/10zPK4hDfRL59JOSNvDlEim1gZmDGGQgpYtZHUZ507pk`
-- Latest settle example: `https://docs.google.com/document/d/1CbuPbrA653tFPqLmBW9IX8iOlbcnUltXJLPSZWqniNY`
+1. TypeScript (Vite UI + Node sim), or  
+2. Python (sim + simple web UI), or  
+3. Godot 4 (if you want a game-engine editor / 2D map early)
 
----
+Recommendation: **1 or 2** for fastest LLM-tool iteration on a budget PC.
 
-## 11. Tech recommendations (MVP)
+**B. Time model**
 
-| Layer | Choice | Why |
-|-------|--------|-----|
-| App | TypeScript / Next.js | Fast Owner UI + API routes |
-| State | Postgres + Drizzle | Snapshots + JSONB |
-| Agents | Vercel AI SDK / OpenAI-compatible tools | Structured outputs |
-| Jobs | In-process queue first | Simple; swap to Redis later |
-| Deploy | Single Node host or Vercel + managed DB | Low ops |
+1. Turn-based days (recommended), or  
+2. Real-time with pause
 
-Open questions on model providers and cost caps left for Owner decision.
+**C. Hardware target**
 
----
+Approx RAM / GPU so we can pick a default model size (e.g. 8 GB RAM CPU-only vs 6 GB VRAM).
 
-## 12. Milestones
+**D. MVP map**
 
-1. **M0 — Spec locked** (this doc + schema review)
-2. **M1 — State & rules** — parser from Drive text; turn-start calc; golden tests from real turns
-3. **M2 — Owner console** — view state, start turn, approve/reject, history diffs
-4. **M3 — Governor settle** — trade + action + military patches with validation
-5. **M4 — Country agents** — propose packages + diplomacy channel
-6. **M5 — Campaign continuity** — events, modifiers, import/export, audit polish
+1. Numbers/panels only (fastest), or  
+2. Simple 2D city schematic from day one
+
+**E. Player vs AI count (MVP)**
+
+Confirm: 1 human company + N LLM companies (suggest N=1 or 2 for MVP).
 
 ---
 
-## 13. Open decisions
+## 13. Explicit non-decisions (waiting for you)
 
-1. **Scope naming:** keep geopolitical “countries” as the core loop, or also ship a company/department skin using the same engine?
-2. **Simultaneous vs sequential diplomacy** during a turn.
-3. **How hard should ACTION income buffs stay?** (current play: very weak)
-4. **Military counter-use:** does defender auto-spend defense/air, or only when Owner/agent chooses?
-5. **Persistence of policies** (export locks) — turn-limited or until Owner clears?
-6. **Model routing:** one model for all countries vs stronger model for Governor only.
+Per your instructions, **not invented yet**:
 
----
+- Full goods list and production tree
+- Exact price formula
+- Win/lose / scenarios
+- Visual style
+- Facility types, tech tree, marketing, debt, stocks, etc.
+- Whether labor is a market good or a separate employment pool
 
-## 14. Next working session
-
-- Confirm open decisions §13 (especially naming/skin).
-- Implement `WorldState` TypeScript types + Drive text parser.
-- Add golden fixture from EU settle 2026-09-26 and China settle 2026-09-26.
-- Skeleton Next.js Owner board reading fixture JSON.
+We will implement those when you specify them.
 
 ---
 
-## Appendix A — Turn-start formula
+## 14. Immediate next step after you answer §12
 
-```text
-for each resource R in {oil, energy, food, steel, electronics}:
-  stock[R] = stock[R] + income[R] - expenditure[R]
-  if stock[R] <= 0: flag(country, R); stock[R] = 0   # continuity rule used in play
+1. Lock stack + time model.
+2. Scaffold runnable empty game loop (advance turn, print/show state).
+3. Add minimal data (placeholder goods only as temporary stubs, clearly marked).
+4. Stop and wait for your first content/mechanics prompt before expanding economy design.
 
-cash = cash + cashIncome   # (expenditure of cash is via trades/events, not a fixed burn)
+---
 
-for each mil key M:
-  stockpile[M] += production[M]   # after event multipliers
-```
+## Appendix — Repo status
 
-## Appendix B — Observed effectiveness bands
-
-From live resolves (illustrative, not yet hard-coded):
-
-| Band | Typical delta |
-|------|----------------|
-| WEAK | income +1..+2; tiny stockpile recovery |
-| WEAK–MODERATE | modest income infra hits on target |
-| HIGHLY EFFECTIVE | large stockpile wipe / income crush / defense attrition when backed by very large force |
-
-Exact tables TBD after Owner preference on balance.
+- GitHub repo already exists: `company_sim` (do not create another).
+- Current tree: `README.md`, `docs/DESIGN.md` only.
+- No engine or game code yet.
