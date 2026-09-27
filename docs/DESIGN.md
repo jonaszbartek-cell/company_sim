@@ -3,7 +3,8 @@
 **Status:** Draft v0.1  
 **Date:** 2026-09-27  
 **Repo:** `jonaszbartek-cell/company_sim`  
-**Source of truth today:** Google Drive shared sim (`01_WORLD_STATE`, `02_PROCEDURES`)
+**Source of truth today:** Google Drive shared sim (`01_WORLD_STATE`, `02_PROCEDURES`)  
+**Drive mirror (summary):** https://docs.google.com/document/d/1Fed_YxfYqSoqpCEXZVdn8YJPHoMSefO5wuhrznvaq1E/edit
 
 ---
 
