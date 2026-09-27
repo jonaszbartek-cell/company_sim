@@ -199,6 +199,50 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "list_contacts",
+            "description": "List other agents/user you can message (mailbox pairs).",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_mail",
+            "description": "Read your mail. Optionally filter to one counterpart (id or kind:id).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "with_whom": {
+                        "type": "string",
+                        "description": "Optional recipient like 'player', 'ai_1', or 'company:ai_2'",
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_message",
+            "description": "Send a short message to another agent or the player (shared mailbox file).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient id, name, or kind:id (e.g. player, ai_2, city:city_a)",
+                    },
+                    "body": {"type": "string", "description": "Message text (max 500 chars)"},
+                },
+                "required": ["to", "body"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "pass_turn",
             "description": "Do nothing this turn but mark yourself as having acted today.",
             "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
@@ -237,7 +281,7 @@ def build_actor_context(world: World, actor: Actor) -> str:
         f"Cash: {actor.cash} | Inventory: {actor.inventory.as_dict()}\n"
         f"Owned plots ({len(owned)}):\n"
         + ("\n".join(owned_lines) if owned_lines else "  (none)")
-        + "\nLoop: buy plot → build → buy inputs → produce → sell. Goal: strongest company.\n"
+        + "\nLoop: buy plot → build → buy inputs → produce → sell. Negotiate via send_message. Goal: strongest company.\n"
         "Prefer 1-3 actions then call done."
     )
 
@@ -247,11 +291,13 @@ def system_prompt_for(actor: Actor) -> str:
         return (
             "You administer a city of normal roads and plots. "
             "Claim municipal plots, build workshops, post market orders, keep territory healthy. "
+            "You may send_message to companies (including the player) to coordinate. "
             "Stay within cash. Use only the provided tools. Be concise."
         )
     return (
         "You run a company. Become the strongest firm: "
         "buy plots, build foundries, buy inputs from the market, produce steel, sell at profit. "
+        "You may send_message to other companies, the city, or the player to negotiate. "
         "Stay within cash. Use only the provided tools. Be concise."
     )
 
@@ -402,6 +448,19 @@ class ToolExecutor:
 
         if name == "pass_turn":
             r = self.world.pass_turn(kind, aid)
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "list_contacts":
+            contacts = self.world.mail().list_contacts(kind, aid)
+            return {"ok": True, "message": "contacts", "data": {"contacts": contacts}}
+
+        if name == "read_mail":
+            with_whom = args.get("with_whom")
+            r = self.world.read_mail(kind, aid, str(with_whom) if with_whom else None)
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "send_message":
+            r = self.world.send_message(kind, aid, str(args["to"]), str(args["body"]))
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "done":
