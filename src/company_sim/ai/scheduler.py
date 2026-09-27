@@ -36,6 +36,7 @@ class AIScheduler:
     llm: LLMClient = field(default_factory=LLMClient)
     _last_decision_at: dict[str, float] = field(default_factory=dict)
     _entity_cycle: itertools.cycle | None = None
+    _entity_tokens: list[str] = field(default_factory=list)
     last_thought: str = "AI idle"
     busy: bool = False
     llm_mode: str = "unknown"  # off | online | fallback
@@ -54,7 +55,15 @@ class AIScheduler:
 
     def ensure_entities(self, world: World) -> None:
         tokens = [f"{a.kind}:{a.id}" for a in world.iter_ai_actors()]
-        self._entity_cycle = itertools.cycle(tokens) if tokens else None
+        if not tokens:
+            self._entity_cycle = None
+            self._entity_tokens = []
+            return
+        # Only rebuild the cycle when the actor set changes — recreating every
+        # tick would reset itertools.cycle to the first entity forever.
+        if tokens != self._entity_tokens:
+            self._entity_tokens = tokens
+            self._entity_cycle = itertools.cycle(tokens)
 
     def update(self, world: World) -> None:
         """Non-blocking. Called every sim tick from the asyncio loop."""
@@ -162,8 +171,9 @@ class AIScheduler:
 
     def _heuristic_city(self, world: World, city: City) -> None:
         owned = world.owned_plots("city", city.id)
+        foundry_cost = world.buildings.get("foundry").build_cost
         for t in owned:
-            if t.plot and t.plot.building is None and city.cash >= 200:
+            if t.plot and t.plot.building is None and city.cash >= foundry_cost:
                 try:
                     world.build_building("city", city.id, t.x, t.y)
                     self.last_thought = f"{city.name}: built foundry at ({t.x},{t.y})"
@@ -223,12 +233,23 @@ class AIScheduler:
                 t = unowned[0]
                 try:
                     world.buy_plot("company", company.id, t.x, t.y)
-                    if company.cash >= 200:
+                    if company.cash >= world.buildings.get("foundry").build_cost:
                         world.build_building("company", company.id, t.x, t.y)
                     self.last_thought = f"{company.name}: bought at ({t.x},{t.y})"
                     return
                 except Exception as exc:  # noqa: BLE001
                     self.last_thought = f"{company.name}: buy failed ({exc})"
+                    return
+
+        foundry_cost = world.buildings.get("foundry").build_cost
+        for t in owned:
+            if t.plot and t.plot.building is None and company.cash >= foundry_cost:
+                try:
+                    world.build_building("company", company.id, t.x, t.y)
+                    self.last_thought = f"{company.name}: built foundry at ({t.x},{t.y})"
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self.last_thought = f"{company.name}: build failed ({exc})"
                     return
 
         if owned and company.cash >= world.config.road_build_cost:

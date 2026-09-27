@@ -134,7 +134,7 @@ def build_actor_context(world: World, actor: Actor) -> str:
     owned = world.owned_plots(actor.kind, actor.id)
     owned_lines = []
     for t in owned[:12]:
-        b = t.plot.building.building_type.value if t.plot and t.plot.building else "none"
+        b = t.plot.building.building_id if t.plot and t.plot.building else "none"
         ptype = t.plot.plot_type.value if t.plot else "?"
         owned_lines.append(f"  ({t.x},{t.y}) {ptype} building={b}")
     if len(owned) > 12:
