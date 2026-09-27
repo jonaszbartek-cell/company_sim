@@ -7,6 +7,8 @@ from enum import Enum
 from typing import Iterator
 import uuid
 
+from company_sim.actors import City
+
 
 class TileKind(str, Enum):
     EMPTY = "empty"
@@ -42,26 +44,6 @@ class Plot:
     building: Building | None = None
     price: int = 100  # PLACEHOLDER
     parcel_id: str | None = None
-
-
-@dataclass
-class City:
-    """
-    A city is an LLM-run administration over normal map cells — not a special tile.
-
-    Territory = set of (x, y) cells (roads + plots) assigned to this city.
-    Buildings in the city are normal plot buildings (owned by companies or the city).
-    """
-
-    id: str
-    name: str
-    # Anchor used for labeling / initial voronoi assignment (not a unique tile type)
-    center_x: int
-    center_y: int
-    population: int = 1000
-    cash: int = 2000  # PLACEHOLDER municipal treasury
-    inventory: dict[str, int] = field(default_factory=dict)
-    territory: list[tuple[int, int]] = field(default_factory=list)
 
 
 @dataclass
@@ -284,18 +266,7 @@ class GridMap:
         return {
             "width": self.width,
             "height": self.height,
-            "cities": [
-                {
-                    "id": c.id,
-                    "name": c.name,
-                    "center_x": c.center_x,
-                    "center_y": c.center_y,
-                    "population": c.population,
-                    "cash": c.cash,
-                    "territory_size": len(c.territory),
-                }
-                for c in self.cities.values()
-            ],
+            "cities": [c.to_public_dict() for c in self.cities.values()],
             "tiles": [
                 {
                     "x": t.x,
@@ -349,10 +320,11 @@ def generate_map(
         grid.cities[cid] = City(
             id=cid,
             name=name,
+            cash=2000,
             center_x=x,
             center_y=y,
             population=pop,
-            inventory={"materials": 20},
+            inventory={"materials": 20, "goods": 0},
         )
 
     # Assign every cell to nearest city (Manhattan)

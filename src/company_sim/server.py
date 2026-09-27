@@ -59,7 +59,15 @@ def create_app() -> FastAPI:
         while not stop_event.is_set():
             world.tick(dt)
             scheduler.update(world)
-            await _broadcast(clients, {"type": "state", "state": world.to_public_dict(), "ai": scheduler.last_thought})
+            await _broadcast(
+                clients,
+                {
+                    "type": "state",
+                    "state": world.to_public_dict(),
+                    "ai": scheduler.last_thought,
+                    "ai_mode": scheduler.llm_mode,
+                },
+            )
             await asyncio.sleep(dt)
 
     @asynccontextmanager
@@ -77,7 +85,16 @@ def create_app() -> FastAPI:
 
     @app.get("/api/state")
     def get_state() -> dict[str, Any]:
-        return {"state": world.to_public_dict(), "ai": scheduler.last_thought}
+        return {
+            "state": world.to_public_dict(),
+            "ai": scheduler.last_thought,
+            "ai_mode": scheduler.llm_mode,
+            "llm": {
+                "enabled": scheduler.llm.config.enabled,
+                "model": scheduler.llm.config.model,
+                "base_url": scheduler.llm.config.base_url,
+            },
+        }
 
     @app.post("/api/pause")
     def pause(body: PauseBody) -> dict[str, Any]:

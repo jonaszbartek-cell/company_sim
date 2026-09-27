@@ -1,6 +1,6 @@
 # company_sim — Design Document
 
-**Status:** Draft v0.5  
+**Status:** Draft v0.6  
 **Date:** 2026-09-27  
 **Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)
 
@@ -46,20 +46,17 @@ The city agent administers a **territory** (set of cells) and acts through the s
 ## 3. World model
 
 ```text
+Actor (base)
+├── Company — cash, inventory; may be player-controlled
+└── City — cash, inventory, population, territory of normal cells
+
 Map tiles: road | plot
 Plot: type, owner (company|city|none), building?, parcel?
-
-City agent:
-  id, name, population, cash, inventory
-  territory: list of cells (administrative region)
-  center: label/voronoi anchor only
-
-Company agent:
-  id, name, cash, inventory
-  owns plots/buildings (same plot system)
 ```
 
-Ownership is unified: `owner_kind` + `owner_id` (`company` or `city`).
+Ownership: `owner_kind` + `owner_id`. LLM tools and player UI share the World Action API.
+
+See also [LLM.md](LLM.md) for local model wiring.
 
 ---
 

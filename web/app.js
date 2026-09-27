@@ -5,6 +5,7 @@ const hudCash = document.getElementById("hud-cash");
 const selectedEl = document.getElementById("selected");
 const inventoryEl = document.getElementById("inventory");
 const aiLog = document.getElementById("ai-log");
+const aiMode = document.getElementById("ai-mode");
 const btnPause = document.getElementById("btn-pause");
 const btnBuy = document.getElementById("btn-buy");
 const btnBuild = document.getElementById("btn-build");
@@ -151,6 +152,7 @@ function refreshPanels() {
 function applyPayload(payload) {
   if (payload.state) state = payload.state;
   if (payload.ai) aiLog.textContent = payload.ai;
+  if (payload.ai_mode) aiMode.textContent = `mode: ${payload.ai_mode}`;
   refreshPanels();
   draw();
 }
