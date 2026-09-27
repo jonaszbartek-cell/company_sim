@@ -29,7 +29,7 @@ A **city is not a special tile**. It is an LLM agent administering a territory o
 | Stack | Python + Web UI → later one exe + local LLM |
 | Time | **Game days** — one day when **all companies** have acted. Slowable; not speed-up |
 | Engine | LLM acts as one agent; when finished, next agent (sequential) |
-| Persist | Text files: `saves/world.txt`, `saves/market.txt`, `saves/agents/<id>.txt` |
+| Persist | Text files: world, market, per-agent, **pairwise mailboxes** |
 | Market | Indexed buy/sell listings; sell goods escrowed on market; buy takes lowest price |
 | Map cells | Only `road` and `plot` (+ rare empty) |
 | Plot types | `standard`, `specialized` (roads are tiles, not plots) |
@@ -116,9 +116,9 @@ Day advances when **player + both AI companies** have each made ≥1 action.
 
 ```text
 for agent in [ai_1, ai_2, city_a]  # sequential
-  save world.txt + market.txt + agents/*.txt
-  LLM loads world + market + agents/<this>.txt
-  LLM tools → Action API
+  save world + market + agents/* + mailboxes/*
+  LLM loads world + market + agents/<this>.txt + this agent's mailboxes
+  LLM tools → Action API (incl. send_message)
   mark acted → save_all → maybe advance day
   next agent
 ```
@@ -129,9 +129,15 @@ Every state-changing action calls `persistence.save_all` so files stay current.
 
 | File | Contains | Must not contain |
 |------|----------|------------------|
-| `saves/world.txt` | day, map, roster ids, turn queue, plot ownership map | agent cash/inventory, market listings |
+| `saves/world.txt` | day, map, roster ids, turn queue, plot ownership, mailbox pair count | agent cash/inventory, market listings, mail bodies |
 | `saves/market.txt` | market inventory, escrow, indexed listings | agent private state, plots |
-| `saves/agents/<id>.txt` | that agent's cash/inventory/plots/buildings + their open listings | other agents' private state, full market book |
+| `saves/agents/<id>.txt` | that agent's cash/inventory/plots + open listings + mail contact list | other agents' private state |
+| `saves/mailboxes/<a>__<b>.txt` | shared thread for that unordered pair only | unrelated pairs |
+
+### Mail
+
+On startup, generate **C(n,2)** mailbox files for all agents (player + AI companies + cities).  
+LLM/player tools: `list_contacts`, `read_mail`, `send_message` → World Action API → append to the pair file.
 
 `min_seconds_between_turns` slows the wall clock between AI turns; it never compresses a day.
 

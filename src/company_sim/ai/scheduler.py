@@ -221,6 +221,21 @@ class AIScheduler:
     def _heuristic_company(self, world: World, company: Actor) -> None:
         owned = world.owned_plots("company", company.id)
 
+        # Occasionally ping the player / a rival (AGENT↔USER / AGENT↔AGENT)
+        if world.day <= 2 or world.tick_index % 17 == 0:
+            try:
+                target = "player" if company.id != "player" else "ai_2"
+                world.send_message(
+                    "company",
+                    company.id,
+                    target,
+                    f"{company.name}: open to trade steel/inputs on day {world.day}.",
+                )
+                self.last_thought = f"{company.name}: messaged {target}"
+                # Fall through to also take an economic action this turn
+            except Exception:
+                pass
+
         # Produce if we have a foundry + inputs
         for t in owned:
             b = t.plot.building if t.plot else None

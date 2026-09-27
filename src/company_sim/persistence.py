@@ -8,7 +8,7 @@ File layout under saves/ — each file has a hard content contract:
     Does NOT contain any agent's cash/inventory details.
 
   market.txt
-    Market only: market inventory, escrow cash, indexed sell/buy listings.
+    Market only: market inventory, escrow cash, indexed buy/sell listings.
     Does NOT contain agent private state or map plots.
 
   agents/<id>.txt
@@ -16,6 +16,10 @@ File layout under saves/ — each file has a hard content contract:
     owned plots + buildings, that agent's open market listings,
     city-only territory fields / company-only is_player.
     Does NOT contain other agents' cash/inventory or full market book.
+
+  mailboxes/<a>__<b>.txt
+    Shared conversation for one unordered pair of actors (all combinations
+    generated at startup). Messages are AGENT↔AGENT and AGENT↔USER.
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ class GamePersistence:
 
     def ensure_dirs(self) -> None:
         self.agents_dir.mkdir(parents=True, exist_ok=True)
+        (self.root / "mailboxes").mkdir(parents=True, exist_ok=True)
 
     def world_path(self) -> Path:
         return self.root / "world.txt"
@@ -73,31 +78,44 @@ class GamePersistence:
         path.write_text(self.render_agent(world, actor), encoding="utf-8")
         return path
 
+    def save_mailboxes(self, world: World) -> list[Path]:
+        self.ensure_dirs()
+        if world.mailboxes is None:
+            return []
+        world.mailboxes.ensure_all_pairs(world.iter_all_actors())
+        return world.mailboxes.save_all()
+
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + every agent file. Returns paths written."""
+        """Write world + market + every agent + all mailboxes."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)
+        for path in self.save_mailboxes(world):
+            written[f"mail:{path.name}"] = path
         return written
 
     def load_context_for_agent(self, world: World, actor: Actor) -> str:
         """
-        Refresh all saves, then return the three-file bundle for this agent:
-        world.txt + market.txt + agents/<this>.txt
+        Refresh all saves, then return the bundle for this agent:
+        world.txt + market.txt + agents/<this>.txt + this agent's mailboxes.
         """
         self.save_all(world)
         world_txt = self.world_path().read_text(encoding="utf-8")
         market_txt = self.market_path().read_text(encoding="utf-8")
         agent_txt = self.agent_path(actor.id).read_text(encoding="utf-8")
+        mail_txt = ""
+        if world.mailboxes is not None:
+            mail_txt = world.mailboxes.render_for_agent(actor.kind, actor.id)
         return (
             f"{world_txt}"
             f"{market_txt}"
             f"{agent_txt}"
+            f"{mail_txt}"
             "---\n"
-            "You control ONLY the agent above. Use tools to act, then call done.\n"
+            "You control ONLY the agent above. Use tools to act (including send_message), then call done.\n"
         )
 
     # --- renderers (one concern each) ------------------------------------
@@ -112,6 +130,8 @@ class GamePersistence:
             f"{c.id}(acted={c.acted_this_day})"
             for c in world.grid.cities.values()
         ]
+        n_agents = len(list(world.iter_all_actors()))
+        mail_n = len(world.mailboxes.boxes) if world.mailboxes else 0
         owned_lines: list[str] = []
         for t in world.grid.tiles:
             if t.kind != TileKind.PLOT or not t.plot or not t.plot.owner_id:
@@ -142,12 +162,14 @@ class GamePersistence:
 
         lines = [
             "=== WORLD ===",
-            f"file: world.txt",
+            "file: world.txt",
             f"day: {world.day}",
             f"paused: {world.paused}",
             f"map: {world.grid.width}x{world.grid.height}",
             f"companies: {', '.join(company_ids)}",
             f"cities: {', '.join(city_ids)}",
+            f"agents: {n_agents}",
+            f"mailbox_pairs: {mail_n} (expected C({n_agents},2)={n_agents * (n_agents - 1) // 2})",
             f"turn_queue: {world.turn_queue_ids()}",
             f"current_turn: {world.current_turn_token()}",
             "",
@@ -171,7 +193,6 @@ class GamePersistence:
     def render_market(self, market: Market) -> str:
         """Market board only."""
         body = market.to_text()
-        # Insert file marker after the === MARKET === header line
         lines = body.splitlines()
         if lines and lines[0].startswith("=== MARKET ==="):
             lines.insert(1, "file: market.txt")
@@ -207,6 +228,10 @@ class GamePersistence:
         ]
         my_listings.sort(key=lambda L: (L.side, L.item_id, L.id))
 
+        contacts: list[dict] = []
+        if world.mailboxes is not None:
+            contacts = world.mailboxes.list_contacts(actor.kind, actor.id)
+
         lines = [
             f"=== AGENT {actor.kind}:{actor.id} ===",
             f"file: agents/{actor.id}.txt",
@@ -229,6 +254,14 @@ class GamePersistence:
         lines.append(f"-- my market listings ({len(my_listings)}) --")
         if my_listings:
             lines.extend(f"  {L.to_text_line()}" for L in my_listings)
+        else:
+            lines.append("  (none)")
+
+        lines.append("")
+        lines.append(f"-- mail contacts ({len(contacts)}) --")
+        if contacts:
+            for c in contacts:
+                lines.append(f"  {c['key']} messages={c['message_count']} file={c['filename']}")
         else:
             lines.append("  (none)")
 

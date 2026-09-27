@@ -10,13 +10,25 @@ Actor (cash, inventory, id, name, acted_this_day)
 
 ## Engine loop
 
-1. Refresh `saves/world.txt`, `saves/market.txt`, `saves/agents/*.txt`
-2. LLM loads **world + market + this agent file**
-3. Tools call the World Action API
+1. Refresh `saves/world.txt`, `market.txt`, `agents/*.txt`, `mailboxes/*.txt`
+2. LLM loads **world + market + this agent file + this agent's mailboxes**
+3. Tools call the World Action API (economy + `send_message`)
 4. Agent marked acted → next AI agent
 5. When **all companies** acted → `day += 1`
 
 Wall-clock gap between turns: `WorldConfig.min_seconds_between_turns` (slow only).
+
+## Mail (AGENT↔AGENT / AGENT↔USER)
+
+Startup builds one text mailbox per unordered pair (`C(n,2)` files under `saves/mailboxes/`).
+
+| Tool | Purpose |
+|------|---------|
+| `list_contacts` | Who you can message |
+| `read_mail` | Read your threads (optional filter) |
+| `send_message` | Append to the shared pair mailbox |
+
+Player UI uses the same Action API (`POST /api/player/message`).
 
 ## Local LLM
 
@@ -42,6 +54,7 @@ Without `COMPANY_SIM_LLM=1`, AI uses heuristics (game still runs).
 | `post_sell` / `post_buy` / `buy_from_market` | Market |
 | `set_production_method` | Choose recipe |
 | `build_road` / `merge_plots` | Map |
+| `list_contacts` / `read_mail` / `send_message` | Mail |
 | `pass_turn` / `done` | End turn |
 
 All tools go through `ToolExecutor` → World actions (same validation as the player UI).
