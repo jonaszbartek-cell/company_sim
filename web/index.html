@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>company_sim</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div id="app">
+    <header>
+      <div class="brand">company_sim</div>
+      <div id="hud-time" class="hud">t=0</div>
+      <div id="hud-cash" class="hud">cash=—</div>
+      <button id="btn-pause" type="button">Pause</button>
+    </header>
+    <main>
+      <canvas id="map" width="960" height="720"></canvas>
+      <aside>
+        <h2>Selected</h2>
+        <pre id="selected">Click a plot</pre>
+        <div class="row">
+          <button id="btn-buy" type="button" disabled>Buy plot</button>
+          <button id="btn-build" type="button" disabled>Build workshop</button>
+        </div>
+        <div class="row">
+          <button id="btn-road" type="button" disabled>Build road</button>
+          <button id="btn-merge" type="button" disabled>Merge with last</button>
+        </div>
+        <h2>Inventory</h2>
+        <pre id="inventory">—</pre>
+        <h2>AI</h2>
+        <pre id="ai-log">—</pre>
+        <pre id="ai-mode" class="hint">mode: —</pre>
+        <p class="hint">
+          Cities are LLM-run territories of normal roads/plots/buildings (no special city tile).
+          Soft tint = which city administers the cell. Gold-brown plots = municipal ownership.
+        </p>
+      </aside>
+    </main>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
