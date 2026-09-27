@@ -88,12 +88,23 @@ A **city is not a special tile**. It is an LLM agent administering a territory o
 | escrow_cash | reserved for open buy orders |
 
 Sell → goods leave seller → sit on market until bought → cash to seller on fill.  
+**Retract sell** → remaining goods return only to that listing's owner.  
 Buy now → fill from **lowest-price** sell listings.  
-Buy order → cash escrowed; auto-match sells at `sell.price <= buy.price`.
+Buy order → cash escrowed; auto-match sells at `sell.price <= buy.price`.  
+**Retract buy** → remaining escrow cash refunded.
 
-### Still later (not missing for v0.7)
+### Direct proposals (agent ↔ agent)
 
-- Direct negotiate / contracts between agents  
+| Action | Escrow | On accept |
+|--------|--------|-----------|
+| `propose_sell` | goods from proposer | recipient pays cash; receives goods |
+| `propose_buy` | cash from proposer | recipient supplies goods; receives cash |
+| reject / cancel | — | escrow returns to proposer |
+
+No duplicate goods/cash: market listings and open proposals hold escrow until fill or release.
+
+### Still later
+
 - Population demand basket  
 - Specialized plot rules / parcel value formulas  
 
@@ -131,7 +142,8 @@ Every state-changing action calls `persistence.save_all` so files stay current.
 |------|----------|------------------|
 | `saves/world.txt` | day, map, roster ids, turn queue, plot ownership, mailbox pair count | agent cash/inventory, market listings, mail bodies |
 | `saves/market.txt` | market inventory, escrow, indexed listings | agent private state, plots |
-| `saves/agents/<id>.txt` | that agent's cash/inventory/plots + open listings + mail contact list | other agents' private state |
+| `saves/proposals.txt` | open direct proposals + proposal escrow totals | unrelated agent private detail |
+| `saves/agents/<id>.txt` | that agent's cash/inventory/plots + open listings + proposals + mail contacts | other agents' private state |
 | `saves/mailboxes/<a>__<b>.txt` | shared thread for that unordered pair only | unrelated pairs |
 
 ### Mail

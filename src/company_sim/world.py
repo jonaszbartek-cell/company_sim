@@ -14,6 +14,7 @@ from company_sim.mailboxes import MailboxStore, actor_key, parse_actor_key
 from company_sim.map_grid import GridMap, TileKind, generate_map
 from company_sim.market import Listing, Market
 from company_sim.persistence import GamePersistence, default_save_dir
+from company_sim.trades import ProposalStore, TradeProposal
 
 
 @dataclass
@@ -41,6 +42,7 @@ class World:
     grid: GridMap
     content: GameContent
     market: Market = field(default_factory=Market)
+    proposals: ProposalStore = field(default_factory=ProposalStore)
     mailboxes: MailboxStore | None = None
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
@@ -86,6 +88,7 @@ class World:
             grid=grid,
             content=content,
             market=Market(),
+            proposals=ProposalStore(),
             mailboxes=MailboxStore(root=save_root),
             persistence=GamePersistence(save_root),
         )
@@ -445,6 +448,7 @@ class World:
         quantity: int,
         price: int,
     ) -> ActionResult:
+        """Sell order: goods leave seller → market inventory; cash only on fill."""
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
@@ -481,6 +485,7 @@ class World:
         quantity: int,
         price: int,
     ) -> ActionResult:
+        """Buy order: cash escrowed; auto-fills sells at sell.price <= buy.price."""
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
@@ -510,6 +515,48 @@ class World:
             {"listing_id": lid, "filled": filled},
         )
 
+    def retract_listing(self, owner_kind: str, owner_id: str, listing_id: int) -> ActionResult:
+        """
+        Retract own market order.
+
+        Sell: return remaining goods from market inventory to this owner only.
+        Buy: return remaining escrowed cash to this owner.
+        """
+        listing = self.market.listings.get(listing_id)
+        if listing is None:
+            raise ActionError(f"Unknown listing #{listing_id}")
+        if listing.owner_kind != owner_kind or listing.owner_id != owner_id:
+            raise ActionError("Can only retract your own listings")
+        actor = self.get_actor(owner_kind, owner_id)
+        if listing.side == "sell":
+            qty = listing.quantity
+            if qty <= 0:
+                self.market.remove_listing(listing_id)
+                raise ActionError("Listing already empty")
+            if self.market.inventory.get(listing.item_id) < qty:
+                raise ActionError("Market inventory mismatch on retract")
+            self.market.inventory.add(listing.item_id, -qty)
+            actor.inventory.add(listing.item_id, qty)
+            self.market.remove_listing(listing_id)
+            self.note_actor_action(owner_kind, owner_id)
+            return ActionResult(
+                True,
+                f"Retracted sell #{listing_id}: {qty}x {listing.item_id} returned",
+                {"listing_id": listing_id, "side": "sell", "quantity": qty, "item_id": listing.item_id},
+            )
+        # buy order
+        refund = listing.price * listing.quantity
+        if refund > 0 and not self.market.escrow_take(owner_kind, owner_id, refund):
+            raise ActionError("Escrow mismatch on buy retract")
+        actor.cash += refund
+        self.market.remove_listing(listing_id)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Retracted buy #{listing_id}: refunded {refund}",
+            {"listing_id": listing_id, "side": "buy", "refund": refund},
+        )
+
     def buy_from_market(
         self,
         owner_kind: str,
@@ -517,7 +564,7 @@ class World:
         item_id: str,
         quantity: int,
     ) -> ActionResult:
-        """Buy up to `quantity` from lowest-price sell listings."""
+        """Standard buy: take goods now from lowest-price sell listings."""
         if quantity <= 0:
             raise ActionError("Invalid quantity")
         if not self.items.has(item_id):
@@ -539,8 +586,7 @@ class World:
             take = min(remaining, listing.quantity)
             cost = take * listing.price
             if buyer.cash < cost:
-                # Afford partial?
-                afford = buyer.cash // listing.price
+                afford = buyer.cash // listing.price if listing.price > 0 else 0
                 if afford <= 0:
                     break
                 take = min(take, afford)
@@ -563,6 +609,8 @@ class World:
         cost = qty * listing.price
         if buyer.cash < cost:
             raise ActionError("Not enough cash")
+        if listing.quantity < qty:
+            raise ActionError("Listing quantity mismatch")
         if self.market.inventory.get(listing.item_id) < qty:
             raise ActionError("Market inventory mismatch")
         buyer.cash -= cost
@@ -578,12 +626,15 @@ class World:
         buyer = self.get_actor(buy.owner_kind, buy.owner_id)
         fills: list[dict] = []
         while buy.quantity > 0 and buy.id in self.market.listings:
-            sells = [s for s in self.market.sell_listings_for(buy.item_id) if s.price <= buy.price]
+            sells = [
+                s
+                for s in self.market.sell_listings_for(buy.item_id)
+                if s.price <= buy.price
+                and not (s.owner_kind == buy.owner_kind and s.owner_id == buy.owner_id)
+            ]
             if not sells:
                 break
             sell = sells[0]
-            if sell.owner_kind == buy.owner_kind and sell.owner_id == buy.owner_id:
-                break
             take = min(buy.quantity, sell.quantity)
             cost = take * sell.price
             # Release escrow at buy.price, pay seller sell.price, refund difference
@@ -612,12 +663,15 @@ class World:
     def _match_buys_against_sell(self, sell: Listing) -> list[dict]:
         matched: list[dict] = []
         while sell.quantity > 0 and sell.id in self.market.listings:
-            buys = [b for b in self.market.buy_listings_for(sell.item_id) if b.price >= sell.price]
+            buys = [
+                b
+                for b in self.market.buy_listings_for(sell.item_id)
+                if b.price >= sell.price
+                and not (b.owner_kind == sell.owner_kind and b.owner_id == sell.owner_id)
+            ]
             if not buys:
                 break
             buy = buys[0]
-            if buy.owner_kind == sell.owner_kind and buy.owner_id == sell.owner_id:
-                break
             before = buy.quantity
             fills = self._fill_buy_listing(buy)
             if not fills:
@@ -626,6 +680,219 @@ class World:
             if buy.quantity == before:
                 break
         return matched
+
+    # --- Direct proposals (agent ↔ agent) --------------------------------
+
+    def propose_sell(
+        self,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        item_id: str,
+        quantity: int,
+        price: int,
+    ) -> ActionResult:
+        """Direct sell proposal: escrow goods; cash moves only if accepted."""
+        return self._create_proposal("sell", from_kind, from_id, to, item_id, quantity, price)
+
+    def propose_buy(
+        self,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        item_id: str,
+        quantity: int,
+        price: int,
+    ) -> ActionResult:
+        """Direct buy proposal: escrow cash; goods move only if accepted."""
+        return self._create_proposal("buy", from_kind, from_id, to, item_id, quantity, price)
+
+    def _create_proposal(
+        self,
+        side: str,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        item_id: str,
+        quantity: int,
+        price: int,
+    ) -> ActionResult:
+        if quantity <= 0 or price < 0:
+            raise ActionError("Invalid quantity/price")
+        if not self.items.has(item_id):
+            raise ActionError(f"Unknown item: {item_id}")
+        proposer = self.get_actor(from_kind, from_id)
+        to_kind, to_id = self.resolve_counterpart(to)
+        if from_kind == to_kind and from_id == to_id:
+            raise ActionError("Cannot propose a trade with yourself")
+        self.get_actor(to_kind, to_id)  # validate counterpart exists
+
+        pid = self.proposals.next_id()
+        if side == "sell":
+            if proposer.inventory.get(item_id) < quantity:
+                raise ActionError("Not enough goods to propose sell")
+            proposer.inventory.add(item_id, -quantity)
+            self.proposals.goods_escrow.add(item_id, quantity)
+        else:
+            total = price * quantity
+            if proposer.cash < total:
+                raise ActionError("Not enough cash to propose buy")
+            proposer.cash -= total
+            self.proposals.cash_escrow[pid] = total
+
+        proposal = TradeProposal(
+            id=pid,
+            side=side,  # type: ignore[arg-type]
+            from_kind=from_kind,
+            from_id=from_id,
+            to_kind=to_kind,
+            to_id=to_id,
+            item_id=item_id,
+            quantity=quantity,
+            price=price,
+            status="open",
+            day=self.day,
+        )
+        self.proposals.add(proposal)
+
+        # Notify counterpart via mailbox (best-effort)
+        try:
+            note = (
+                f"[proposal #{pid}] {side} {quantity}x {item_id} @ {price}/u "
+                f"from {from_kind}:{from_id}"
+            )
+            self.mail().send(
+                from_kind=from_kind,
+                from_id=from_id,
+                to_kind=to_kind,
+                to_id=to_id,
+                body=note,
+                day=self.day,
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        self.note_actor_action(from_kind, from_id)
+        return ActionResult(
+            True,
+            f"Proposed {side} #{pid} to {to_kind}:{to_id}: {quantity}x {item_id} @ {price}",
+            {"proposal": proposal.to_public_dict()},
+        )
+
+    def accept_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
+        """Counterpart accepts an open proposal addressed to them."""
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            raise ActionError(f"Unknown proposal #{proposal_id}")
+        if proposal.status != "open":
+            raise ActionError(f"Proposal #{proposal_id} is {proposal.status}")
+        if proposal.to_kind != owner_kind or proposal.to_id != owner_id:
+            raise ActionError("Only the recipient can accept this proposal")
+
+        proposer = self.get_actor(proposal.from_kind, proposal.from_id)
+        recipient = self.get_actor(owner_kind, owner_id)
+        qty = proposal.quantity
+        price = proposal.price
+        total = proposal.total
+        item_id = proposal.item_id
+
+        if proposal.side == "sell":
+            # Proposer already escrowed goods; recipient pays cash, receives goods
+            if recipient.cash < total:
+                raise ActionError("Not enough cash to accept sell proposal")
+            if self.proposals.goods_escrow.get(item_id) < qty:
+                raise ActionError("Proposal goods escrow mismatch")
+            recipient.cash -= total
+            proposer.cash += total
+            self.proposals.goods_escrow.add(item_id, -qty)
+            recipient.inventory.add(item_id, qty)
+        else:
+            # Proposer escrowed cash; recipient must supply goods
+            reserved = self.proposals.cash_escrow.get(proposal_id)
+            if reserved is None or reserved != total:
+                raise ActionError("Proposal cash escrow mismatch")
+            if recipient.inventory.get(item_id) < qty:
+                raise ActionError("Not enough goods to fulfill buy proposal")
+            recipient.inventory.add(item_id, -qty)
+            proposer.inventory.add(item_id, qty)
+            recipient.cash += total
+            del self.proposals.cash_escrow[proposal_id]
+
+        proposal.status = "accepted"
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Accepted proposal #{proposal_id}",
+            {"proposal": proposal.to_public_dict()},
+        )
+
+    def reject_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
+        """Counterpart rejects; escrow returns to proposer."""
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            raise ActionError(f"Unknown proposal #{proposal_id}")
+        if proposal.status != "open":
+            raise ActionError(f"Proposal #{proposal_id} is {proposal.status}")
+        if proposal.to_kind != owner_kind or proposal.to_id != owner_id:
+            raise ActionError("Only the recipient can reject this proposal")
+        self._release_proposal_escrow(proposal)
+        proposal.status = "rejected"
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Rejected proposal #{proposal_id}",
+            {"proposal": proposal.to_public_dict()},
+        )
+
+    def cancel_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
+        """Proposer cancels; escrow returns."""
+        proposal = self.proposals.get(proposal_id)
+        if proposal is None:
+            raise ActionError(f"Unknown proposal #{proposal_id}")
+        if proposal.status != "open":
+            raise ActionError(f"Proposal #{proposal_id} is {proposal.status}")
+        if proposal.from_kind != owner_kind or proposal.from_id != owner_id:
+            raise ActionError("Only the proposer can cancel this proposal")
+        self._release_proposal_escrow(proposal)
+        proposal.status = "cancelled"
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Cancelled proposal #{proposal_id}",
+            {"proposal": proposal.to_public_dict()},
+        )
+
+    def _release_proposal_escrow(self, proposal: TradeProposal) -> None:
+        proposer = self.get_actor(proposal.from_kind, proposal.from_id)
+        if proposal.side == "sell":
+            qty = proposal.quantity
+            if self.proposals.goods_escrow.get(proposal.item_id) < qty:
+                raise ActionError("Proposal goods escrow mismatch on release")
+            self.proposals.goods_escrow.add(proposal.item_id, -qty)
+            proposer.inventory.add(proposal.item_id, qty)
+        else:
+            reserved = self.proposals.cash_escrow.pop(proposal.id, None)
+            if reserved is None:
+                raise ActionError("Proposal cash escrow missing on release")
+            proposer.cash += reserved
+
+    # --- Conservation helpers (tests / debugging) -----------------------
+
+    def total_item_quantity(self, item_id: str) -> int:
+        """All copies of an item: actors + market sells + proposal sell escrow."""
+        total = self.market.inventory.get(item_id)
+        total += self.proposals.goods_escrow.get(item_id)
+        for actor in self.iter_all_actors():
+            total += actor.inventory.get(item_id)
+        return total
+
+    def total_cash(self) -> int:
+        """All cash: actors + market buy escrow + proposal buy escrow."""
+        total = sum(self.market.escrow_cash.values())
+        total += sum(self.proposals.cash_escrow.values())
+        for actor in self.iter_all_actors():
+            total += actor.cash
+        return total
 
     def set_paused(self, paused: bool) -> ActionResult:
         self.paused = paused
@@ -723,6 +990,7 @@ class World:
             "current_turn": self.current_turn_token(),
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),
+            "proposals": self.proposals.to_public_dict(),
             "mailboxes": self.mail().to_public_dict() if self.mailboxes else {"mailbox_count": 0},
             "content": self.content.to_public_dict(),
             "map": self.grid.to_public_dict(),

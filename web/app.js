@@ -16,6 +16,17 @@ const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
 const btnMktBuyIron = document.getElementById("btn-mkt-buy-iron");
 const btnMktSellSteel = document.getElementById("btn-mkt-sell-steel");
+const btnMktBuyOrder = document.getElementById("btn-mkt-buy-order");
+const btnMktRetract = document.getElementById("btn-mkt-retract");
+const mktRetractId = document.getElementById("mkt-retract-id");
+const tradeTo = document.getElementById("trade-to");
+const proposalsEl = document.getElementById("proposals");
+const proposalIdInput = document.getElementById("proposal-id");
+const btnProposeSell = document.getElementById("btn-propose-sell");
+const btnProposeBuy = document.getElementById("btn-propose-buy");
+const btnAcceptProposal = document.getElementById("btn-accept-proposal");
+const btnRejectProposal = document.getElementById("btn-reject-proposal");
+const btnCancelProposal = document.getElementById("btn-cancel-proposal");
 const mailTo = document.getElementById("mail-to");
 const mailBody = document.getElementById("mail-body");
 const mailLog = document.getElementById("mail-log");
@@ -138,11 +149,18 @@ function refreshPanels() {
   hudCash.textContent = player ? `cash=${player.cash}` : "cash=—";
   inventoryEl.textContent = player ? JSON.stringify(player.inventory, null, 2) : "—";
   if (state.market) {
-    const sells = (state.market.sell_listings || []).slice(0, 8);
-    marketEl.textContent = sells.length
-      ? sells.map((L) => `#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
-      : "(no sell listings)";
+    const sells = (state.market.sell_listings || []).slice(0, 6);
+    const buys = (state.market.buy_listings || []).slice(0, 4);
+    const sellTxt = sells.length
+      ? sells.map((L) => `#${L.id} sell ${L.quantity}x ${L.item_id} @${L.price} (${L.owner_id})`).join("\n")
+      : "(no sells)";
+    const buyTxt = buys.length
+      ? buys.map((L) => `#${L.id} buy ${L.quantity}x ${L.item_id} @${L.price} (${L.owner_id})`).join("\n")
+      : "(no buys)";
+    marketEl.textContent = `${sellTxt}\n---\n${buyTxt}`;
   }
+  refreshTradeContacts();
+  refreshProposals();
   refreshMailContacts();
   refreshMailLog();
   btnPause.textContent = state.paused ? "Resume" : "Pause";
@@ -297,6 +315,118 @@ btnMktSellSteel.addEventListener("click", async () => {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ item_id: "steel", quantity: 1, price: 40 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnMktBuyOrder.addEventListener("click", async () => {
+  const res = await fetch("/api/player/market/buy_order", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: "coal", quantity: 1, price: 8 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnMktRetract.addEventListener("click", async () => {
+  const listing_id = Number(mktRetractId.value);
+  if (!listing_id) return;
+  const res = await fetch("/api/player/market/retract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ listing_id }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+function refreshTradeContacts() {
+  if (!tradeTo || !state || !state.mailboxes) return;
+  const pid = `company:${state.player_company_id}`;
+  const boxes = state.mailboxes.mailboxes || [];
+  const prev = tradeTo.value;
+  const options = [];
+  for (const box of boxes) {
+    const other = (box.participants || []).find((p) => p !== pid);
+    if (!other) continue;
+    options.push(other);
+  }
+  options.sort();
+  tradeTo.innerHTML = options.map((k) => `<option value="${k}">${k}</option>`).join("");
+  if (prev && options.includes(prev)) tradeTo.value = prev;
+}
+
+function refreshProposals() {
+  if (!proposalsEl || !state) return;
+  const mine = (state.proposals && state.proposals.proposals) || [];
+  const pid = `company:${state.player_company_id}`;
+  const relevant = mine.filter((p) => p.from === pid || p.to === pid);
+  if (!relevant.length) {
+    proposalsEl.textContent = "(no open proposals involving you)";
+    return;
+  }
+  proposalsEl.textContent = relevant
+    .map((p) => `#${p.id} ${p.side} ${p.quantity}x ${p.item_id} @${p.price} ${p.from}→${p.to}`)
+    .join("\n");
+}
+
+btnProposeSell.addEventListener("click", async () => {
+  const to = tradeTo.value;
+  if (!to) return;
+  const res = await fetch("/api/player/propose_sell", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, item_id: "steel", quantity: 1, price: 40 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnProposeBuy.addEventListener("click", async () => {
+  const to = tradeTo.value;
+  if (!to) return;
+  const res = await fetch("/api/player/propose_buy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, item_id: "iron", quantity: 1, price: 10 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnAcceptProposal.addEventListener("click", async () => {
+  const proposal_id = Number(proposalIdInput.value);
+  if (!proposal_id) return;
+  const res = await fetch("/api/player/accept_proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnRejectProposal.addEventListener("click", async () => {
+  const proposal_id = Number(proposalIdInput.value);
+  if (!proposal_id) return;
+  const res = await fetch("/api/player/reject_proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnCancelProposal.addEventListener("click", async () => {
+  const proposal_id = Number(proposalIdInput.value);
+  if (!proposal_id) return;
+  const res = await fetch("/api/player/cancel_proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id }),
   });
   const data = await res.json();
   if (!data.ok) alert(data.message);

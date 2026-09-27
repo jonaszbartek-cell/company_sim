@@ -37,6 +37,24 @@
           <button id="btn-mkt-buy-iron" type="button">Buy 1 iron</button>
           <button id="btn-mkt-sell-steel" type="button">Sell 1 steel @40</button>
         </div>
+        <div class="row">
+          <button id="btn-mkt-buy-order" type="button">Buy order 1 coal @8</button>
+          <input id="mkt-retract-id" type="number" min="1" placeholder="#" style="width:4rem" />
+          <button id="btn-mkt-retract" type="button">Retract #</button>
+        </div>
+        <h2>Direct trade</h2>
+        <select id="trade-to"></select>
+        <div class="row">
+          <button id="btn-propose-sell" type="button">Propose sell 1 steel @40</button>
+          <button id="btn-propose-buy" type="button">Propose buy 1 iron @10</button>
+        </div>
+        <pre id="proposals">—</pre>
+        <div class="row">
+          <input id="proposal-id" type="number" min="1" placeholder="id" style="width:4rem" />
+          <button id="btn-accept-proposal" type="button">Accept</button>
+          <button id="btn-reject-proposal" type="button">Reject</button>
+          <button id="btn-cancel-proposal" type="button">Cancel mine</button>
+        </div>
         <h2>Mail</h2>
         <select id="mail-to"></select>
         <textarea id="mail-body" rows="2" placeholder="Message…"></textarea>
