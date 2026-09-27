@@ -16,6 +16,10 @@ const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
 const btnMktBuyIron = document.getElementById("btn-mkt-buy-iron");
 const btnMktSellSteel = document.getElementById("btn-mkt-sell-steel");
+const mailTo = document.getElementById("mail-to");
+const mailBody = document.getElementById("mail-body");
+const mailLog = document.getElementById("mail-log");
+const btnMailSend = document.getElementById("btn-mail-send");
 
 let state = null;
 let selected = null;
@@ -139,6 +143,8 @@ function refreshPanels() {
       ? sells.map((L) => `#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
       : "(no sell listings)";
   }
+  refreshMailContacts();
+  refreshMailLog();
   btnPause.textContent = state.paused ? "Resume" : "Pause";
 
   if (!selected) {
@@ -294,6 +300,60 @@ btnMktSellSteel.addEventListener("click", async () => {
   });
   const data = await res.json();
   if (!data.ok) alert(data.message);
+});
+
+function refreshMailContacts() {
+  if (!state || !state.mailboxes) return;
+  const pid = `company:${state.player_company_id}`;
+  const boxes = state.mailboxes.mailboxes || [];
+  const prev = mailTo.value;
+  const options = [];
+  for (const box of boxes) {
+    const other = (box.participants || []).find((p) => p !== pid);
+    if (!other) continue;
+    options.push({ key: other, count: box.message_count || 0 });
+  }
+  options.sort((a, b) => a.key.localeCompare(b.key));
+  mailTo.innerHTML = options
+    .map((o) => `<option value="${o.key}">${o.key} (${o.count})</option>`)
+    .join("");
+  if (prev && options.some((o) => o.key === prev)) mailTo.value = prev;
+}
+
+function refreshMailLog() {
+  if (!state || !state.mailboxes) {
+    mailLog.textContent = "—";
+    return;
+  }
+  const pid = `company:${state.player_company_id}`;
+  const withKey = mailTo.value;
+  const box = (state.mailboxes.mailboxes || []).find(
+    (b) => (b.participants || []).includes(pid) && (b.participants || []).includes(withKey)
+  );
+  if (!box || !box.messages || !box.messages.length) {
+    mailLog.textContent = "(empty)";
+    return;
+  }
+  mailLog.textContent = box.messages
+    .slice(-12)
+    .map((m) => `[d${m.day}] ${m.from} → ${m.to}: ${m.body}`)
+    .join("\n");
+}
+
+mailTo.addEventListener("change", refreshMailLog);
+
+btnMailSend.addEventListener("click", async () => {
+  const to = mailTo.value;
+  const body = (mailBody.value || "").trim();
+  if (!to || !body) return;
+  const res = await fetch("/api/player/message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, body }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+  else mailBody.value = "";
 });
 
 function connect() {

@@ -62,6 +62,11 @@ class MarketBuyBody(BaseModel):
     quantity: int
 
 
+class MessageBody(BaseModel):
+    to: str
+    body: str
+
+
 def create_app() -> FastAPI:
     world = World.new_game(WorldConfig())
     scheduler = AIScheduler()
@@ -198,6 +203,30 @@ def create_app() -> FastAPI:
     @app.get("/api/market")
     def get_market() -> dict[str, Any]:
         return world.market.to_public_dict()
+
+    @app.get("/api/mail")
+    def get_mail(with_whom: str | None = None) -> dict[str, Any]:
+        try:
+            result = world.read_mail("company", _player(), with_whom)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.get("/api/mail/contacts")
+    def mail_contacts() -> dict[str, Any]:
+        try:
+            contacts = world.mail().list_contacts("company", _player())
+            return {"ok": True, "contacts": contacts}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/message")
+    def player_message(body: MessageBody) -> dict[str, Any]:
+        try:
+            result = world.send_message("company", _player(), body.to, body.body)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

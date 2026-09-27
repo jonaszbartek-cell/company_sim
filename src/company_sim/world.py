@@ -10,6 +10,7 @@ from company_sim.actors import Actor, ActorKind, Company
 from company_sim.buildings import Building
 from company_sim.content import GameContent
 from company_sim.items import Inventory
+from company_sim.mailboxes import MailboxStore, actor_key, parse_actor_key
 from company_sim.map_grid import GridMap, TileKind, generate_map
 from company_sim.market import Listing, Market
 from company_sim.persistence import GamePersistence, default_save_dir
@@ -40,6 +41,7 @@ class World:
     grid: GridMap
     content: GameContent
     market: Market = field(default_factory=Market)
+    mailboxes: MailboxStore | None = None
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
     day: int = 1
@@ -84,6 +86,7 @@ class World:
             grid=grid,
             content=content,
             market=Market(),
+            mailboxes=MailboxStore(root=save_root),
             persistence=GamePersistence(save_root),
         )
 
@@ -115,8 +118,16 @@ class World:
 
         # Seed a few market sell listings from nowhere (starter liquidity)
         world._seed_market()
+        # Generate C(n,2) mailbox files for the full cast (player + AI cos + cities)
+        assert world.mailboxes is not None
+        world.mailboxes.ensure_all_pairs(world.iter_all_actors())
         world.persistence.save_all(world)
         return world
+
+    def mail(self) -> MailboxStore:
+        if self.mailboxes is None:
+            raise ActionError("Mailboxes not initialized")
+        return self.mailboxes
 
     def _seed_market(self) -> None:
         """Place a small city-backed sell board so buyers have something to hit."""
@@ -626,6 +637,82 @@ class World:
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(True, "Passed")
 
+    # --- Mail -----------------------------------------------------------
+
+    def resolve_counterpart(self, to: str) -> tuple[str, str]:
+        """
+        Resolve a counterpart from 'kind:id', bare id, or name.
+        Prefers exact kind:id, then unique id, then unique name.
+        """
+        to = to.strip()
+        if not to:
+            raise ActionError("Missing recipient")
+        if ":" in to:
+            kind, aid = parse_actor_key(to)
+            self.get_actor(kind, aid)
+            return kind, aid
+        # Exact id match
+        matches: list[tuple[str, str]] = []
+        for a in self.iter_all_actors():
+            if a.id == to:
+                matches.append((a.kind, a.id))
+            elif a.name.lower() == to.lower():
+                matches.append((a.kind, a.id))
+        # Deduplicate
+        uniq = list(dict.fromkeys(matches))
+        if len(uniq) == 1:
+            return uniq[0]
+        if not uniq:
+            raise ActionError(f"Unknown recipient: {to}")
+        raise ActionError(f"Ambiguous recipient '{to}': {[actor_key(k, i) for k, i in uniq]}")
+
+    def send_message(
+        self,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        body: str,
+    ) -> ActionResult:
+        """AGENT↔AGENT / AGENT↔USER mail. Does not mark acted (free during turn)."""
+        self.get_actor(from_kind, from_id)
+        to_kind, to_id = self.resolve_counterpart(to)
+        if from_kind == to_kind and from_id == to_id:
+            raise ActionError("Cannot message yourself")
+        try:
+            msg = self.mail().send(
+                from_kind=from_kind,
+                from_id=from_id,
+                to_kind=to_kind,
+                to_id=to_id,
+                body=body,
+                day=self.day,
+            )
+        except (KeyError, ValueError) as exc:
+            raise ActionError(str(exc)) from exc
+        # Keep other saves in sync (agent files note "my" side indirectly via mail bundle)
+        self.persistence.save_all(self)
+        return ActionResult(
+            True,
+            f"Sent to {msg.to_key}: {msg.body[:80]}",
+            {"from": msg.from_key, "to": msg.to_key, "day": msg.day, "body": msg.body},
+        )
+
+    def read_mail(self, owner_kind: str, owner_id: str, with_whom: str | None = None) -> ActionResult:
+        self.get_actor(owner_kind, owner_id)
+        store = self.mail()
+        if with_whom:
+            to_kind, to_id = self.resolve_counterpart(with_whom)
+            box = store.get_box(actor_key(owner_kind, owner_id), actor_key(to_kind, to_id))
+            return ActionResult(True, "mail", {"mailbox": box.to_public_dict()})
+        return ActionResult(
+            True,
+            "mail",
+            {
+                "contacts": store.list_contacts(owner_kind, owner_id),
+                "text": store.render_for_agent(owner_kind, owner_id),
+            },
+        )
+
     def to_public_dict(self) -> dict:
         return {
             "day": self.day,
@@ -636,6 +723,7 @@ class World:
             "current_turn": self.current_turn_token(),
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),
+            "mailboxes": self.mail().to_public_dict() if self.mailboxes else {"mailbox_count": 0},
             "content": self.content.to_public_dict(),
             "map": self.grid.to_public_dict(),
         }
