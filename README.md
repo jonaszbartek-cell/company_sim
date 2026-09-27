@@ -34,15 +34,17 @@ PYTHONPATH=src python -m company_sim
 
 - Agent base → Company / City
 - Day advances when all companies have acted (slowable AI turns)
-- Market: post sell/buy, buy lowest-price listings
+- Market: sell/buy orders, retract, standard buy (lowest price); cash only moves on fill
+- Direct proposals: agent↔agent sell/buy offers with escrow (no duplicate goods/cash)
 - Produce action on foundries (iron+coal+energy → steel)
-- Text saves under `saves/` (world, market, per-agent, pairwise mailboxes) for LLM context
+- Text saves under `saves/` (world, market, proposals, per-agent, pairwise mailboxes)
 - Sequential LLM/heuristic engine: one agent, then the next
 - Mail: AGENT↔AGENT and AGENT↔USER via `send_message` / player UI
 
 ### Controls
 
 - Click plot → Buy / Build / Produce / Road / Merge
-- Market: Buy 1 iron / Sell 1 steel
+- Market: Buy / Sell / Buy order / Retract #
+- Direct trade: propose sell/buy, accept/reject/cancel
 - Mail: pick contact → send message
 - Pass day / Pause

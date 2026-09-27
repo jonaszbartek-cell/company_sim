@@ -119,7 +119,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "post_sell",
-            "description": "Post a sell order: goods move to market inventory until bought.",
+            "description": "Post a sell order: goods move to market inventory until bought (cash only on fill).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -136,7 +136,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "post_buy",
-            "description": "Post a buy order at a max price (cash escrowed).",
+            "description": "Post a buy order at a max price (cash escrowed; auto-matches sells at <= price).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -153,7 +153,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "buy_from_market",
-            "description": "Buy goods now from the lowest-price sell listings.",
+            "description": "Standard buy: take goods now from the lowest-price sell listings.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -161,6 +161,104 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "quantity": {"type": "integer"},
                 },
                 "required": ["item_id", "quantity"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "retract_listing",
+            "description": "Retract your market order. Sell: goods return to you. Buy: escrow cash refunded.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "listing_id": {"type": "integer", "description": "Market listing #id"},
+                },
+                "required": ["listing_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_sell",
+            "description": "Direct sell proposal to another agent (goods escrowed until accept/reject/cancel).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Recipient id or kind:id"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                    "price": {"type": "integer", "description": "Cash per unit"},
+                },
+                "required": ["to", "item_id", "quantity", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_buy",
+            "description": "Direct buy proposal to another agent (cash escrowed until accept/reject/cancel).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["to", "item_id", "quantity", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_proposals",
+            "description": "List open direct proposals involving you.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "accept_proposal",
+            "description": "Accept a direct proposal addressed to you.",
+            "parameters": {
+                "type": "object",
+                "properties": {"proposal_id": {"type": "integer"}},
+                "required": ["proposal_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "reject_proposal",
+            "description": "Reject a direct proposal addressed to you (escrow returns to proposer).",
+            "parameters": {
+                "type": "object",
+                "properties": {"proposal_id": {"type": "integer"}},
+                "required": ["proposal_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_proposal",
+            "description": "Cancel your own open direct proposal (escrow returns to you).",
+            "parameters": {
+                "type": "object",
+                "properties": {"proposal_id": {"type": "integer"}},
+                "required": ["proposal_id"],
                 "additionalProperties": False,
             },
         },
@@ -281,7 +379,10 @@ def build_actor_context(world: World, actor: Actor) -> str:
         f"Cash: {actor.cash} | Inventory: {actor.inventory.as_dict()}\n"
         f"Owned plots ({len(owned)}):\n"
         + ("\n".join(owned_lines) if owned_lines else "  (none)")
-        + "\nLoop: buy plot → build → buy inputs → produce → sell. Negotiate via send_message. Goal: strongest company.\n"
+        + "\nLoop: buy plot → build → buy inputs → produce → sell. "
+        "Market: post_sell/post_buy/buy_from_market/retract_listing. "
+        "Direct trades: propose_sell/propose_buy + accept/reject/cancel. "
+        "Negotiate via send_message. Goal: strongest company.\n"
         "Prefer 1-3 actions then call done."
     )
 
@@ -429,6 +530,52 @@ class ToolExecutor:
 
         if name == "buy_from_market":
             r = self.world.buy_from_market(kind, aid, str(args["item_id"]), int(args["quantity"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "retract_listing":
+            r = self.world.retract_listing(kind, aid, int(args["listing_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "propose_sell":
+            r = self.world.propose_sell(
+                kind,
+                aid,
+                str(args["to"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+                int(args["price"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "propose_buy":
+            r = self.world.propose_buy(
+                kind,
+                aid,
+                str(args["to"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+                int(args["price"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "list_proposals":
+            rows = self.world.proposals.for_agent(kind, aid, open_only=True)
+            return {
+                "ok": True,
+                "message": "proposals",
+                "data": {"proposals": [p.to_public_dict() for p in rows]},
+            }
+
+        if name == "accept_proposal":
+            r = self.world.accept_proposal(kind, aid, int(args["proposal_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "reject_proposal":
+            r = self.world.reject_proposal(kind, aid, int(args["proposal_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "cancel_proposal":
+            r = self.world.cancel_proposal(kind, aid, int(args["proposal_id"]))
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_road":

@@ -67,6 +67,21 @@ class MessageBody(BaseModel):
     body: str
 
 
+class ListingIdBody(BaseModel):
+    listing_id: int
+
+
+class ProposalTradeBody(BaseModel):
+    to: str
+    item_id: str
+    quantity: int
+    price: int
+
+
+class ProposalIdBody(BaseModel):
+    proposal_id: int
+
+
 def create_app() -> FastAPI:
     world = World.new_game(WorldConfig())
     scheduler = AIScheduler()
@@ -188,6 +203,67 @@ def create_app() -> FastAPI:
     def market_buy(body: MarketBuyBody) -> dict[str, Any]:
         try:
             result = world.buy_from_market("company", _player(), body.item_id, body.quantity)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/market/retract")
+    def market_retract(body: ListingIdBody) -> dict[str, Any]:
+        try:
+            result = world.retract_listing("company", _player(), body.listing_id)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.get("/api/proposals")
+    def get_proposals() -> dict[str, Any]:
+        rows = world.proposals.for_agent("company", _player(), open_only=True)
+        return {
+            "ok": True,
+            "proposals": [p.to_public_dict() for p in rows],
+            "all_open": world.proposals.to_public_dict(),
+        }
+
+    @app.post("/api/player/propose_sell")
+    def propose_sell(body: ProposalTradeBody) -> dict[str, Any]:
+        try:
+            result = world.propose_sell(
+                "company", _player(), body.to, body.item_id, body.quantity, body.price
+            )
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/propose_buy")
+    def propose_buy(body: ProposalTradeBody) -> dict[str, Any]:
+        try:
+            result = world.propose_buy(
+                "company", _player(), body.to, body.item_id, body.quantity, body.price
+            )
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/accept_proposal")
+    def accept_proposal(body: ProposalIdBody) -> dict[str, Any]:
+        try:
+            result = world.accept_proposal("company", _player(), body.proposal_id)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/reject_proposal")
+    def reject_proposal(body: ProposalIdBody) -> dict[str, Any]:
+        try:
+            result = world.reject_proposal("company", _player(), body.proposal_id)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/cancel_proposal")
+    def cancel_proposal(body: ProposalIdBody) -> dict[str, Any]:
+        try:
+            result = world.cancel_proposal("company", _player(), body.proposal_id)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}

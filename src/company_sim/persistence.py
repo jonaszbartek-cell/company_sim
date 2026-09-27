@@ -20,6 +20,9 @@ File layout under saves/ — each file has a hard content contract:
   mailboxes/<a>__<b>.txt
     Shared conversation for one unordered pair of actors (all combinations
     generated at startup). Messages are AGENT↔AGENT and AGENT↔USER.
+
+  proposals.txt
+    Open direct sell/buy proposals between agents + proposal escrow totals.
 """
 
 from __future__ import annotations
@@ -54,6 +57,9 @@ class GamePersistence:
     def market_path(self) -> Path:
         return self.root / "market.txt"
 
+    def proposals_path(self) -> Path:
+        return self.root / "proposals.txt"
+
     def agent_path(self, agent_id: str) -> Path:
         safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in agent_id)
         return self.agents_dir / f"{safe}.txt"
@@ -72,6 +78,12 @@ class GamePersistence:
         path.write_text(self.render_market(market), encoding="utf-8")
         return path
 
+    def save_proposals(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.proposals_path()
+        path.write_text(world.proposals.to_text(), encoding="utf-8")
+        return path
+
     def save_agent(self, world: World, actor: Actor) -> Path:
         self.ensure_dirs()
         path = self.agent_path(actor.id)
@@ -86,10 +98,11 @@ class GamePersistence:
         return world.mailboxes.save_all()
 
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + every agent + all mailboxes."""
+        """Write world + market + proposals + every agent + all mailboxes."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
+            "proposals": self.save_proposals(world),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)
@@ -100,22 +113,27 @@ class GamePersistence:
     def load_context_for_agent(self, world: World, actor: Actor) -> str:
         """
         Refresh all saves, then return the bundle for this agent:
-        world.txt + market.txt + agents/<this>.txt + this agent's mailboxes.
+        world + market + proposals + agents/<this>.txt + mail + own direct trades.
         """
         self.save_all(world)
         world_txt = self.world_path().read_text(encoding="utf-8")
         market_txt = self.market_path().read_text(encoding="utf-8")
+        proposals_txt = self.proposals_path().read_text(encoding="utf-8")
         agent_txt = self.agent_path(actor.id).read_text(encoding="utf-8")
         mail_txt = ""
         if world.mailboxes is not None:
             mail_txt = world.mailboxes.render_for_agent(actor.kind, actor.id)
+        trades_txt = world.proposals.render_for_agent(actor.kind, actor.id)
         return (
             f"{world_txt}"
             f"{market_txt}"
+            f"{proposals_txt}"
             f"{agent_txt}"
             f"{mail_txt}"
+            f"{trades_txt}"
             "---\n"
-            "You control ONLY the agent above. Use tools to act (including send_message), then call done.\n"
+            "You control ONLY the agent above. Use tools to act "
+            "(market orders, retract, direct proposals, send_message), then call done.\n"
         )
 
     # --- renderers (one concern each) ------------------------------------
@@ -254,6 +272,14 @@ class GamePersistence:
         lines.append(f"-- my market listings ({len(my_listings)}) --")
         if my_listings:
             lines.extend(f"  {L.to_text_line()}" for L in my_listings)
+        else:
+            lines.append("  (none)")
+
+        my_props = world.proposals.for_agent(actor.kind, actor.id, open_only=True)
+        lines.append("")
+        lines.append(f"-- my open direct proposals ({len(my_props)}) --")
+        if my_props:
+            lines.extend(f"  {p.to_text_line()}" for p in my_props)
         else:
             lines.append("  (none)")
 

@@ -10,9 +10,9 @@ Actor (cash, inventory, id, name, acted_this_day)
 
 ## Engine loop
 
-1. Refresh `saves/world.txt`, `market.txt`, `agents/*.txt`, `mailboxes/*.txt`
-2. LLM loads **world + market + this agent file + this agent's mailboxes**
-3. Tools call the World Action API (economy + `send_message`)
+1. Refresh `saves/world.txt`, `market.txt`, `proposals.txt`, `agents/*.txt`, `mailboxes/*.txt`
+2. LLM loads **world + market + proposals + this agent file + mail + own direct trades**
+3. Tools call the World Action API (economy + mail + proposals)
 4. Agent marked acted → next AI agent
 5. When **all companies** acted → `day += 1`
 
@@ -51,7 +51,9 @@ Without `COMPANY_SIM_LLM=1`, AI uses heuristics (game still runs).
 | `get_market` | Listings + market inventory |
 | `list_unowned_plots` | Nearby unowned plots |
 | `buy_plot` / `build_building` / `produce` | Core loop |
-| `post_sell` / `post_buy` / `buy_from_market` | Market |
+| `post_sell` / `post_buy` / `buy_from_market` / `retract_listing` | Market orders |
+| `propose_sell` / `propose_buy` / `list_proposals` | Direct agent trades |
+| `accept_proposal` / `reject_proposal` / `cancel_proposal` | Resolve proposals |
 | `set_production_method` | Choose recipe |
 | `build_road` / `merge_plots` | Map |
 | `list_contacts` / `read_mail` / `send_message` | Mail |

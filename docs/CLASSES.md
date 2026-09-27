@@ -23,9 +23,10 @@ Market
 | `BuildingDefinition` + `Building` | Types / instances | status idle\|working |
 | `ProductionMethod` | Recipes | `data/production_methods.yaml` |
 | `Plot` / `Parcel` | Land + merge size | location on Tile `(x,y)` |
-| `Market` / `Listing` | Indexed orders | lowest-price buys |
+| `Market` / `Listing` | Indexed orders | sell escrow goods; buy escrow cash; retract |
+| `ProposalStore` / `TradeProposal` | Direct deals | agent↔agent sell/buy with escrow |
 | `MailboxStore` | Pairwise text mail | C(n,2) files at startup |
-| `GamePersistence` | Text saves | world / market / agents / mailboxes |
+| `GamePersistence` | Text saves | world / market / proposals / agents / mailboxes |
 | `World` | Day loop + actions | |
 | `GameContent` | YAML load + validate | |
 
@@ -39,7 +40,6 @@ Market
 
 | Class | When |
 |-------|------|
-| `Contract` / negotiate | Direct deals between agents |
 | Population demand | City consumption |
 | Specialized plot bonuses | |
 
