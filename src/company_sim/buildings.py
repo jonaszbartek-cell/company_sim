@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
+import uuid
 
 import yaml
+
+BuildingStatus = Literal["idle", "working"]
 
 
 @dataclass(frozen=True)
@@ -39,21 +43,30 @@ class BuildingDefinition:
 
 @dataclass
 class Building:
-    """Runtime instance of a building on a plot."""
+    """
+    Runtime instance of a building on a plot.
+
+    possible production methods come from GameContent via building_id;
+    production_method_id is the currently chosen method.
+    """
 
     building_id: str
     owner_kind: str  # "company" | "city"
     owner_id: str
+    id: str = field(default_factory=lambda: f"bld_{uuid.uuid4().hex[:8]}")
     production_method_id: str | None = None
-    progress: float = 0.0  # 0..1 toward next batch
+    status: BuildingStatus = "idle"
+    progress: float = 0.0  # 0..1 toward next batch (legacy / multi-day)
 
     def to_public_dict(self) -> dict:
         return {
+            "id": self.id,
             "building_id": self.building_id,
             "building_type": self.building_id,  # alias for older UI
             "owner_kind": self.owner_kind,
             "owner_id": self.owner_id,
             "production_method_id": self.production_method_id,
+            "status": self.status,
             "progress": self.progress,
         }
 

@@ -1,6 +1,6 @@
 # company_sim — Design Document
 
-**Status:** Draft v0.6  
+**Status:** Draft v0.7  
 **Date:** 2026-09-27  
 **Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)
 
@@ -8,19 +8,17 @@
 
 ## 1. Game concept
 
-Real-time company economic simulator on a **2D grid** of **normal roads and plots only**.
+Company economic simulator on a **2D grid** of **roads and plots**. Goal: make the strongest company.
 
-### City clarification (Owner)
+### Scoped cast (now)
 
-A **city is not a special tile or mega-building**.
+| Role | Count |
+|------|-------|
+| Player company | 1 |
+| AI companies | 2 |
+| City agent | 1 |
 
-A city is an **LLM agent** responsible for running a municipality. On the map, that municipality is just:
-
-- normal **roads**
-- normal **plots** (standard / specialized)
-- normal **buildings** on those plots (companies or the city itself may own them)
-
-The city agent administers a **territory** (set of cells) and acts through the same kinds of actions as companies where relevant (roads, claiming/building on plots, later trade/policy).
+A **city is not a special tile**. It is an LLM agent administering a territory of normal roads/plots/buildings.
 
 ---
 
@@ -29,60 +27,110 @@ The city agent administers a **territory** (set of cells) and acts through the s
 | Topic | Decision |
 |-------|----------|
 | Stack | Python + Web UI → later one exe + local LLM |
-| Time | Real-time + pause |
-| GPU | RTX 3050 |
-| AI | One LLM switching across ~20 companies + ~5 cities |
-| Map cells | Only `road` and `plot` (+ rare empty hinterland) |
-| City | LLM + territory + treasury/inventory — **not** a unique cell type |
-| Plot types | `standard`, `specialized` |
-| Road access | Every plot adjacent to a road |
-| Merge | Adjacent owned plots → parcel bonuses |
-| Road builders | Cities and companies |
-| Player start | Cash + starter plot + inventory |
-| Goods/recipes | TBD |
+| Time | **Game days** — one day when **all companies** have acted. Slowable; not speed-up |
+| Engine | LLM acts as one agent; when finished, next agent (sequential) |
+| Persist | Text files: `saves/world.txt`, `saves/market.txt`, `saves/agents/<id>.txt` |
+| Market | Indexed buy/sell listings; sell goods escrowed on market; buy takes lowest price |
+| Map cells | Only `road` and `plot` (+ rare empty) |
+| Plot types | `standard`, `specialized` (roads are tiles, not plots) |
+| Goods | iron, coal, energy, steel + Foundry / make_steel |
 
 ---
 
-## 3. World model
+## 3. Class fields (your list + gaps)
+
+### Agent (`Actor` → Company | City)
+
+| Field | Notes |
+|-------|-------|
+| id | yes |
+| cash | yes |
+| inventory | yes |
+| plots | owned via world lookup (not duplicated on agent) |
+| **name** | needed for UI / LLM |
+| **kind** | company \| city |
+| **acted_this_day** | day scheduling |
+| Company: **is_player** | |
+| City: center, population, territory | |
+
+### Plot
+
+| Field | Notes |
+|-------|-------|
+| id | yes |
+| owner | `owner_kind` + `owner_id` |
+| value | land valuation (seeded from price; future use) |
+| type | `standard` \| `specialized` |
+| location | **yes, but on the Tile** as `(x,y)` — keep it there, echo in agent text files |
+| size | always **1** per cell; **parcel size** grows when merged |
+| building | optional Building instance |
+| price | buy price while unowned |
+
+**Roads:** not plots. No size, no building. `TileKind.ROAD` only.
+
+### Building
+
+| Field | Notes |
+|-------|-------|
+| id | instance id |
+| building_id | type from YAML (e.g. foundry) |
+| possible production methods | from catalog by `building_id` |
+| chosen method | `production_method_id` |
+| status | `idle` \| `working` |
+| owner | kind + id (redundant with plot owner, kept for clarity) |
+
+### Market
+
+| Field | Notes |
+|-------|-------|
+| inventory | goods from open sell listings |
+| listings | indexed `#id`, side buy\|sell, item, qty, price, owner |
+| escrow_cash | reserved for open buy orders |
+
+Sell → goods leave seller → sit on market until bought → cash to seller on fill.  
+Buy now → fill from **lowest-price** sell listings.  
+Buy order → cash escrowed; auto-match sells at `sell.price <= buy.price`.
+
+### Still later (not missing for v0.7)
+
+- Direct negotiate / contracts between agents  
+- Population demand basket  
+- Specialized plot rules / parcel value formulas  
+
+---
+
+## 4. Main loop (per agent turn)
+
+1. Buy plot  
+2. Build building  
+3. Buy inputs (market)  
+4. Produce  
+5. Sell (market)  
+(+ roads, merge, pass)
+
+Day advances when **player + both AI companies** have each made ≥1 action.
+
+---
+
+## 5. Engine + persistence
 
 ```text
-Actor (base)
-├── Company — cash, inventory; may be player-controlled
-└── City — cash, inventory, population, territory of normal cells
-
-Map tiles: road | plot
-Plot: type, owner (company|city|none), building?, parcel?
+for agent in [ai_1, ai_2, city_a]  # sequential
+  save world.txt + market.txt + agents/*.txt
+  LLM loads world + market + agents/<this>.txt
+  LLM tools → Action API
+  mark acted → maybe advance day
+  next agent
 ```
 
-Ownership: `owner_kind` + `owner_id`. LLM tools and player UI share the World Action API.
-
-See also [LLM.md](LLM.md) for local model wiring and [CLASSES.md](CLASSES.md) for the domain class map.
+`min_seconds_between_turns` slows the wall clock between AI turns; it never compresses a day.
 
 ---
 
-## 4. Map generation
+## 6. Map generation
 
-1. Place city **anchors** (not special tiles).
-2. Voronoi-assign every cell to nearest city → `tile.city_id`.
-3. Road lattice + corridors between anchors.
-4. Remaining cells → plots.
-5. Assert every plot has road access.
-6. Build city.territory lists from `city_id`.
-
----
-
-## 5. Assumptions (changeable)
-
-- Territory boundaries start as nearest-city voronoi; later growth/annexation TBD.
-- Cities may own plots and build buildings like companies (municipal workshops for now).
-- Soft UI tint shows which city administers a cell; no “C” mega-tile.
-
----
-
-## 6. Need later (not blocking)
-
-1. Specialized plot rules  
-2. Parcel bonus values  
-3. Goods / buildings / production methods  
-4. How city population relates to buildings vs abstract stock  
-5. Whether companies need city permission to build in a territory  
+1. Place city anchor(s).  
+2. Voronoi territory.  
+3. Road lattice.  
+4. Remaining cells → plots.  
+5. Assert road access.  

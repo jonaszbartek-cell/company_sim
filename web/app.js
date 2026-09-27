@@ -4,13 +4,18 @@ const hudTime = document.getElementById("hud-time");
 const hudCash = document.getElementById("hud-cash");
 const selectedEl = document.getElementById("selected");
 const inventoryEl = document.getElementById("inventory");
+const marketEl = document.getElementById("market");
 const aiLog = document.getElementById("ai-log");
 const aiMode = document.getElementById("ai-mode");
 const btnPause = document.getElementById("btn-pause");
+const btnPass = document.getElementById("btn-pass");
 const btnBuy = document.getElementById("btn-buy");
 const btnBuild = document.getElementById("btn-build");
+const btnProduce = document.getElementById("btn-produce");
 const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
+const btnMktBuyIron = document.getElementById("btn-mkt-buy-iron");
+const btnMktSellSteel = document.getElementById("btn-mkt-sell-steel");
 
 let state = null;
 let selected = null;
@@ -119,16 +124,28 @@ function draw() {
 
 function refreshPanels() {
   if (!state) return;
-  hudTime.textContent = `t=${state.time_sec.toFixed(1)}s` + (state.paused ? " PAUSED" : "");
+  const acted = state.companies?.find((c) => c.id === state.player_company_id)?.acted_this_day;
+  hudTime.textContent =
+    `day ${state.day}` +
+    (state.paused ? " PAUSED" : "") +
+    (acted ? " (you acted)" : "") +
+    (state.current_turn ? ` | AI:${state.current_turn}` : "");
   const player = state.companies.find((c) => c.id === state.player_company_id);
   hudCash.textContent = player ? `cash=${player.cash}` : "cash=—";
   inventoryEl.textContent = player ? JSON.stringify(player.inventory, null, 2) : "—";
+  if (state.market) {
+    const sells = (state.market.sell_listings || []).slice(0, 8);
+    marketEl.textContent = sells.length
+      ? sells.map((L) => `#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
+      : "(no sell listings)";
+  }
   btnPause.textContent = state.paused ? "Resume" : "Pause";
 
   if (!selected) {
     selectedEl.textContent = "Click a plot / road candidate";
     btnBuy.disabled = true;
     btnBuild.disabled = true;
+    btnProduce.disabled = true;
     btnRoad.disabled = true;
     btnMerge.disabled = true;
     return;
@@ -137,6 +154,7 @@ function refreshPanels() {
   selectedEl.textContent = JSON.stringify({ x: selected.x, y: selected.y, tile: t }, null, 2);
   const canBuy = t && t.kind === "plot" && t.plot && !t.plot.owner_id;
   const canBuild = t && t.kind === "plot" && isPlayerOwned(t.plot) && !t.plot.building;
+  const canProduce = t && t.kind === "plot" && isPlayerOwned(t.plot) && t.plot.building;
   const canRoad = t && ((t.kind === "plot" && t.plot && !t.plot.owner_id) || t.kind === "empty");
   let canMerge = false;
   if (lastOwnedClick && t && isPlayerOwned(t.plot) && !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)) {
@@ -145,6 +163,7 @@ function refreshPanels() {
   }
   btnBuy.disabled = !canBuy;
   btnBuild.disabled = !canBuild;
+  btnProduce.disabled = !canProduce;
   btnRoad.disabled = !canRoad;
   btnMerge.disabled = !canMerge;
 }
@@ -238,6 +257,43 @@ btnMerge.addEventListener("click", async () => {
   const data = await res.json();
   if (!data.ok) alert(data.message);
   else lastOwnedClick = selected;
+});
+
+btnProduce.addEventListener("click", async () => {
+  if (!selected) return;
+  const res = await fetch("/api/player/produce", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(selected),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnPass.addEventListener("click", async () => {
+  const res = await fetch("/api/player/pass", { method: "POST" });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnMktBuyIron.addEventListener("click", async () => {
+  const res = await fetch("/api/player/market/buy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: "iron", quantity: 1 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnMktSellSteel.addEventListener("click", async () => {
+  const res = await fetch("/api/player/market/sell", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_id: "steel", quantity: 1, price: 40 }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
 });
 
 function connect() {

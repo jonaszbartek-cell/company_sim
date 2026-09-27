@@ -10,9 +10,10 @@
   <div id="app">
     <header>
       <div class="brand">company_sim</div>
-      <div id="hud-time" class="hud">t=0</div>
+      <div id="hud-time" class="hud">day 1</div>
       <div id="hud-cash" class="hud">cash=—</div>
       <button id="btn-pause" type="button">Pause</button>
+      <button id="btn-pass" type="button">Pass day</button>
     </header>
     <main>
       <canvas id="map" width="960" height="720"></canvas>
@@ -24,17 +25,24 @@
           <button id="btn-build" type="button" disabled>Build foundry</button>
         </div>
         <div class="row">
+          <button id="btn-produce" type="button" disabled>Produce</button>
           <button id="btn-road" type="button" disabled>Build road</button>
           <button id="btn-merge" type="button" disabled>Merge with last</button>
         </div>
         <h2>Inventory</h2>
         <pre id="inventory">—</pre>
+        <h2>Market</h2>
+        <pre id="market">—</pre>
+        <div class="row">
+          <button id="btn-mkt-buy-iron" type="button">Buy 1 iron</button>
+          <button id="btn-mkt-sell-steel" type="button">Sell 1 steel @40</button>
+        </div>
         <h2>AI</h2>
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
         <p class="hint">
-          Cities are LLM-run territories of normal roads/plots/buildings (no special city tile).
-          Soft tint = which city administers the cell. Gold-brown plots = municipal ownership.
+          1 city + 2 AI companies + you. One day when all companies act.
+          Soft tint = city territory. Gold-brown = municipal plots.
         </p>
       </aside>
     </main>

@@ -46,6 +46,22 @@ class MergeBody(BaseModel):
     y2: int
 
 
+class ProduceBody(BaseModel):
+    x: int
+    y: int
+
+
+class MarketOrderBody(BaseModel):
+    item_id: str
+    quantity: int
+    price: int = 0
+
+
+class MarketBuyBody(BaseModel):
+    item_id: str
+    quantity: int
+
+
 def create_app() -> FastAPI:
     world = World.new_game(WorldConfig())
     scheduler = AIScheduler()
@@ -82,6 +98,9 @@ def create_app() -> FastAPI:
     app.state.world = world
     app.state.scheduler = scheduler
 
+    def _player() -> str:
+        return world.player_company_id
+
     @app.get("/api/state")
     def get_state() -> dict[str, Any]:
         return {
@@ -103,7 +122,7 @@ def create_app() -> FastAPI:
     @app.post("/api/player/buy_plot")
     def buy_plot(body: BuyPlotBody) -> dict[str, Any]:
         try:
-            result = world.buy_plot("company", world.player_company_id, body.x, body.y)
+            result = world.buy_plot("company", _player(), body.x, body.y)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}
@@ -112,12 +131,16 @@ def create_app() -> FastAPI:
     def build(body: BuildBody) -> dict[str, Any]:
         try:
             result = world.build_building(
-                "company",
-                world.player_company_id,
-                body.x,
-                body.y,
-                body.building_id,
+                "company", _player(), body.x, body.y, body.building_id
             )
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/produce")
+    def produce(body: ProduceBody) -> dict[str, Any]:
+        try:
+            result = world.produce("company", _player(), body.x, body.y)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}
@@ -125,7 +148,7 @@ def create_app() -> FastAPI:
     @app.post("/api/player/build_road")
     def build_road(body: RoadBody) -> dict[str, Any]:
         try:
-            result = world.company_build_road(world.player_company_id, body.x, body.y)
+            result = world.company_build_road(_player(), body.x, body.y)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}
@@ -134,25 +157,57 @@ def create_app() -> FastAPI:
     def merge_plots(body: MergeBody) -> dict[str, Any]:
         try:
             result = world.merge_plots(
-                "company",
-                world.player_company_id,
-                body.x1,
-                body.y1,
-                body.x2,
-                body.y2,
+                "company", _player(), body.x1, body.y1, body.x2, body.y2
             )
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/market/sell")
+    def market_sell(body: MarketOrderBody) -> dict[str, Any]:
+        try:
+            result = world.post_sell("company", _player(), body.item_id, body.quantity, body.price)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/market/buy_order")
+    def market_buy_order(body: MarketOrderBody) -> dict[str, Any]:
+        try:
+            result = world.post_buy("company", _player(), body.item_id, body.quantity, body.price)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/market/buy")
+    def market_buy(body: MarketBuyBody) -> dict[str, Any]:
+        try:
+            result = world.buy_from_market("company", _player(), body.item_id, body.quantity)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/pass")
+    def pass_turn() -> dict[str, Any]:
+        try:
+            result = world.pass_turn("company", _player())
+            return {"ok": result.ok, "message": result.message}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.get("/api/market")
+    def get_market() -> dict[str, Any]:
+        return world.market.to_public_dict()
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:
         await ws.accept()
         clients.add(ws)
         try:
-            await ws.send_json({"type": "state", "state": world.to_public_dict(), "ai": scheduler.last_thought})
+            await ws.send_json(
+                {"type": "state", "state": world.to_public_dict(), "ai": scheduler.last_thought}
+            )
             while True:
-                # Client may send commands later; keep alive by receiving
                 await ws.receive_text()
         except WebSocketDisconnect:
             pass

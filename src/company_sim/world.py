@@ -1,8 +1,9 @@
-"""World state + real-time tick loop."""
+"""World state + day-based agent turn loop."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
 from company_sim.actions import ActionError, ActionResult
 from company_sim.actors import Actor, ActorKind, Company
@@ -10,18 +11,23 @@ from company_sim.buildings import Building
 from company_sim.content import GameContent
 from company_sim.items import Inventory
 from company_sim.map_grid import GridMap, TileKind, generate_map
+from company_sim.market import Listing, Market
+from company_sim.persistence import GamePersistence, default_save_dir
 
 
 @dataclass
 class WorldConfig:
-    map_width: int = 40
-    map_height: int = 30
-    tick_hz: float = 10.0
-    starting_cities: int = 5
-    ai_company_count: int = 5
+    map_width: int = 24
+    map_height: int = 18
+    tick_hz: float = 4.0  # UI refresh / delay pacing only
+    starting_cities: int = 1
+    ai_company_count: int = 2
     road_stride: int = 3
     player_starting_cash: int = 2500
     road_build_cost: int = 50  # PLACEHOLDER
+    # Seconds of wall time between AI agent turns (slow-down only; never speeds sim)
+    min_seconds_between_turns: float = 1.5
+    save_dir: str | None = None
 
 
 def _starter_inventory() -> Inventory:
@@ -33,11 +39,16 @@ class World:
     config: WorldConfig
     grid: GridMap
     content: GameContent
+    market: Market = field(default_factory=Market)
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
+    day: int = 1
     time_sec: float = 0.0
     paused: bool = False
     tick_index: int = 0
+    # Round-robin index into turn_queue (AI companies + cities; player acts via UI)
+    turn_index: int = 0
+    persistence: GamePersistence = field(default_factory=GamePersistence)
 
     @property
     def items(self):
@@ -56,12 +67,9 @@ class World:
         config = config or WorldConfig()
         content = GameContent.load()
 
+        # Scoped seed: one city for now
         seeds = [
-            ("city_a", "Northport", 8, 6, 800),
-            ("city_b", "Millhaven", 30, 7, 950),
-            ("city_c", "Riverbend", 20, 15, 1100),
-            ("city_d", "Oakridge", 10, 24, 900),
-            ("city_e", "Southgate", 32, 22, 1050),
+            ("city_a", "Millhaven", config.map_width // 2, config.map_height // 2, 1100),
         ][: config.starting_cities]
 
         grid = generate_map(
@@ -70,7 +78,14 @@ class World:
             city_seeds=seeds,
             road_stride=config.road_stride,
         )
-        world = cls(config=config, grid=grid, content=content)
+        save_root = Path(config.save_dir) if config.save_dir else default_save_dir()
+        world = cls(
+            config=config,
+            grid=grid,
+            content=content,
+            market=Market(),
+            persistence=GamePersistence(save_root),
+        )
 
         player = Company(
             id="player",
@@ -92,12 +107,37 @@ class World:
                 cash=1500,
                 inventory=Inventory({"iron": 10, "coal": 10, "energy": 10, "steel": 0}),
             )
+            world._assign_starter_plot("company", cid)
 
         for city in grid.cities.values():
             city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
             world._assign_starter_plot("city", city.id, near=(city.center_x, city.center_y))
 
+        # Seed a few market sell listings from nowhere (starter liquidity)
+        world._seed_market()
+        world.persistence.save_all(world)
         return world
+
+    def _seed_market(self) -> None:
+        """Place a small city-backed sell board so buyers have something to hit."""
+        for city in self.grid.cities.values():
+            for item_id, qty, price in (("iron", 5, 8), ("coal", 5, 6), ("energy", 5, 10)):
+                if city.inventory.get(item_id) < qty:
+                    continue
+                city.inventory.add(item_id, -qty)
+                self.market.inventory.add(item_id, qty)
+                lid = self.market.next_id()
+                self.market.add_listing(
+                    Listing(
+                        id=lid,
+                        side="sell",
+                        item_id=item_id,
+                        quantity=qty,
+                        price=price,
+                        owner_kind="city",
+                        owner_id=city.id,
+                    )
+                )
 
     def get_actor(self, kind: ActorKind | str, actor_id: str) -> Actor:
         if kind == "company":
@@ -111,9 +151,34 @@ class World:
         return actor
 
     def iter_ai_actors(self) -> list[Actor]:
+        """AI turn order: rival companies first, then cities."""
         actors: list[Actor] = [c for c in self.companies.values() if not c.is_player]
         actors.extend(self.grid.cities.values())
         return actors
+
+    def iter_all_actors(self) -> list[Actor]:
+        actors: list[Actor] = list(self.companies.values())
+        actors.extend(self.grid.cities.values())
+        return actors
+
+    def iter_companies(self) -> list[Company]:
+        return list(self.companies.values())
+
+    def turn_queue_ids(self) -> list[str]:
+        return [f"{a.kind}:{a.id}" for a in self.iter_ai_actors()]
+
+    def current_turn_token(self) -> str | None:
+        queue = self.turn_queue_ids()
+        if not queue:
+            return None
+        return queue[self.turn_index % len(queue)]
+
+    def current_turn_actor(self) -> Actor | None:
+        token = self.current_turn_token()
+        if not token:
+            return None
+        kind, aid = token.split(":", 1)
+        return self.get_actor(kind, aid)
 
     def owned_plots(self, kind: str, actor_id: str) -> list:
         return [
@@ -155,38 +220,47 @@ class World:
         tile = candidates[0][1]
         tile.plot.claim(owner_kind, owner_id)
         tile.plot.price = 0
+        tile.plot.value = tile.plot.value or 100
         self.grid.register_single_parcel(tile.x, tile.y)
 
+    # --- Day scheduling -------------------------------------------------
+
     def tick(self, dt: float) -> None:
+        """Wall-clock pacing only (UI). Game days advance via agent actions."""
         if self.paused:
             return
         self.time_sec += dt
         self.tick_index += 1
-        self._tick_production(dt)
 
-    def _tick_production(self, dt: float) -> None:
-        for tile in self.grid.tiles:
-            if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
-                continue
-            b = tile.plot.building
-            if not b.production_method_id:
-                continue
-            try:
-                method = self.production.get(b.production_method_id)
-                actor = self.get_actor(b.owner_kind, b.owner_id)
-            except (ActionError, KeyError):
-                continue
-            if method.building_id != b.building_id:
-                continue
-            bonus = self.grid.production_bonus_for_plot(tile.plot)
-            b.progress += (dt / method.duration_sec) * bonus
-            while b.progress >= 1.0:
-                if not actor.inventory.has(method.inputs):
-                    b.progress = 1.0
-                    break
-                actor.inventory.consume(method.inputs)
-                actor.inventory.produce(method.outputs)
-                b.progress -= 1.0
+    def note_actor_action(self, kind: str, actor_id: str) -> None:
+        """Mark that this actor took an action this day; maybe advance the day."""
+        actor = self.get_actor(kind, actor_id)
+        actor.mark_acted()
+        self._maybe_advance_day()
+
+    def _maybe_advance_day(self) -> None:
+        """One game day passes when ALL companies have made an action."""
+        companies = self.iter_companies()
+        if not companies:
+            return
+        if all(c.acted_this_day for c in companies):
+            self.day += 1
+            for actor in self.iter_all_actors():
+                actor.reset_day()
+            self._idle_all_buildings()
+            self.persistence.save_all(self)
+
+    def _idle_all_buildings(self) -> None:
+        for t in self.grid.tiles:
+            if t.plot and t.plot.building and t.plot.building.status == "working":
+                t.plot.building.status = "idle"
+
+    def advance_ai_turn(self) -> None:
+        queue = self.turn_queue_ids()
+        if queue:
+            self.turn_index = (self.turn_index + 1) % len(queue)
+
+    # --- Core actions ---------------------------------------------------
 
     def buy_plot(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
@@ -204,7 +278,9 @@ class World:
             raise ActionError("Not enough cash")
         actor.cash -= price
         tile.plot.claim(owner_kind, owner_id)
+        tile.plot.value = max(tile.plot.value, price)
         self.grid.register_single_parcel(x, y)
+        self.note_actor_action(owner_kind, owner_id)
         return ActionResult(True, f"Bought plot ({x},{y}) for {price}", {"x": x, "y": y, "price": price})
 
     def build_building(
@@ -241,11 +317,73 @@ class World:
             owner_kind=owner_kind,
             owner_id=owner_id,
             production_method_id=method_id,
+            status="idle",
         )
+        self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
             f"Built {bdef.name} at ({x},{y})",
             {"cost": bdef.build_cost, "building_id": building_id, "production_method_id": method_id},
+        )
+
+    def set_production_method(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        x: int,
+        y: int,
+        method_id: str,
+    ) -> ActionResult:
+        tile = self.grid.get(x, y)
+        if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
+            raise ActionError("No building there")
+        b = tile.plot.building
+        if not tile.plot.owned_by(owner_kind, owner_id):
+            raise ActionError("You do not own this plot")
+        try:
+            method = self.production.get(method_id)
+        except KeyError as exc:
+            raise ActionError(f"Unknown method: {method_id}") from exc
+        if method.building_id != b.building_id:
+            raise ActionError(f"{method_id} cannot run in {b.building_id}")
+        b.production_method_id = method_id
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(True, f"Set method {method_id}", {"method_id": method_id})
+
+    def produce(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
+        """Run one production batch on a building (explicit day action)."""
+        actor = self.get_actor(owner_kind, owner_id)
+        tile = self.grid.get(x, y)
+        if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
+            raise ActionError("No building there")
+        if not tile.plot.owned_by(owner_kind, owner_id):
+            raise ActionError("You do not own this plot")
+        b = tile.plot.building
+        if not b.production_method_id:
+            raise ActionError("No production method selected")
+        try:
+            method = self.production.get(b.production_method_id)
+        except KeyError as exc:
+            raise ActionError(f"Unknown method: {b.production_method_id}") from exc
+        if method.building_id != b.building_id:
+            raise ActionError("Method does not match building")
+        if not actor.inventory.has(method.inputs):
+            raise ActionError(f"Missing inputs: need {method.inputs}, have {actor.inventory.as_dict()}")
+
+        b.status = "working"
+        actor.inventory.consume(method.inputs)
+        # Parcel bonus: chance of extra output unit (simple floor of bonus)
+        bonus = self.grid.production_bonus_for_plot(tile.plot)
+        actor.inventory.produce(method.outputs)
+        if bonus > 1.0 and int(bonus) > 1:
+            # PLACEHOLDER: grant floor(bonus)-1 extra full output sets rarely skipped
+            for _ in range(int(bonus) - 1):
+                actor.inventory.produce(method.outputs)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Produced via {method.id} at ({x},{y})",
+            {"inputs": method.inputs, "outputs": method.outputs, "bonus": bonus},
         )
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int) -> ActionResult:
@@ -257,6 +395,7 @@ class World:
             raise ActionError("Cannot build road there")
         actor.cash -= cost
         self.grid.rebuild_territories()
+        self.note_actor_action(actor_kind, actor_id)
         return ActionResult(
             True,
             f"{actor_kind} {actor_id} built road at ({x},{y})",
@@ -280,19 +419,221 @@ class World:
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
         size = self.grid.parcel_size(parcel_id)
+        self.note_actor_action(owner_kind, owner_id)
         return ActionResult(True, f"Merged plots into parcel ({size} cells)", {"parcel_id": parcel_id, "size": size})
+
+    # --- Market ---------------------------------------------------------
+
+    def post_sell(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        item_id: str,
+        quantity: int,
+        price: int,
+    ) -> ActionResult:
+        if quantity <= 0 or price < 0:
+            raise ActionError("Invalid quantity/price")
+        if not self.items.has(item_id):
+            raise ActionError(f"Unknown item: {item_id}")
+        actor = self.get_actor(owner_kind, owner_id)
+        if actor.inventory.get(item_id) < quantity:
+            raise ActionError("Not enough goods to sell")
+        actor.inventory.add(item_id, -quantity)
+        self.market.inventory.add(item_id, quantity)
+        lid = self.market.next_id()
+        listing = Listing(
+            id=lid,
+            side="sell",
+            item_id=item_id,
+            quantity=quantity,
+            price=price,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
+        self.market.add_listing(listing)
+        matched = self._match_buys_against_sell(listing)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Posted sell #{lid}: {quantity}x {item_id} @ {price}",
+            {"listing_id": lid, "matched": matched},
+        )
+
+    def post_buy(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        item_id: str,
+        quantity: int,
+        price: int,
+    ) -> ActionResult:
+        if quantity <= 0 or price < 0:
+            raise ActionError("Invalid quantity/price")
+        if not self.items.has(item_id):
+            raise ActionError(f"Unknown item: {item_id}")
+        actor = self.get_actor(owner_kind, owner_id)
+        total = price * quantity
+        if actor.cash < total:
+            raise ActionError("Not enough cash to post buy order")
+        actor.cash -= total
+        self.market.escrow_add(owner_kind, owner_id, total)
+        lid = self.market.next_id()
+        listing = Listing(
+            id=lid,
+            side="buy",
+            item_id=item_id,
+            quantity=quantity,
+            price=price,
+            owner_kind=owner_kind,
+            owner_id=owner_id,
+        )
+        self.market.add_listing(listing)
+        filled = self._fill_buy_listing(listing)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Posted buy #{lid}: {quantity}x {item_id} @ {price}",
+            {"listing_id": lid, "filled": filled},
+        )
+
+    def buy_from_market(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        item_id: str,
+        quantity: int,
+    ) -> ActionResult:
+        """Buy up to `quantity` from lowest-price sell listings."""
+        if quantity <= 0:
+            raise ActionError("Invalid quantity")
+        if not self.items.has(item_id):
+            raise ActionError(f"Unknown item: {item_id}")
+        buyer = self.get_actor(owner_kind, owner_id)
+        remaining = quantity
+        spent = 0
+        got = 0
+        fills: list[dict] = []
+        while remaining > 0:
+            sells = [
+                s
+                for s in self.market.sell_listings_for(item_id)
+                if not (s.owner_kind == owner_kind and s.owner_id == owner_id)
+            ]
+            if not sells:
+                break
+            listing = sells[0]
+            take = min(remaining, listing.quantity)
+            cost = take * listing.price
+            if buyer.cash < cost:
+                # Afford partial?
+                afford = buyer.cash // listing.price
+                if afford <= 0:
+                    break
+                take = min(take, afford)
+                cost = take * listing.price
+            self._transfer_sell_to_buyer(listing, take, buyer)
+            spent += cost
+            got += take
+            remaining -= take
+            fills.append({"listing_id": listing.id, "qty": take, "price": listing.price})
+        if got == 0:
+            raise ActionError("No matching sell listings (or cannot afford)")
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Bought {got}x {item_id} for {spent}",
+            {"got": got, "spent": spent, "fills": fills},
+        )
+
+    def _transfer_sell_to_buyer(self, listing: Listing, qty: int, buyer: Actor) -> None:
+        cost = qty * listing.price
+        if buyer.cash < cost:
+            raise ActionError("Not enough cash")
+        if self.market.inventory.get(listing.item_id) < qty:
+            raise ActionError("Market inventory mismatch")
+        buyer.cash -= cost
+        self.market.inventory.add(listing.item_id, -qty)
+        buyer.inventory.add(listing.item_id, qty)
+        seller = self.get_actor(listing.owner_kind, listing.owner_id)
+        seller.cash += cost
+        listing.quantity -= qty
+        if listing.quantity <= 0:
+            self.market.remove_listing(listing.id)
+
+    def _fill_buy_listing(self, buy: Listing) -> list[dict]:
+        buyer = self.get_actor(buy.owner_kind, buy.owner_id)
+        fills: list[dict] = []
+        while buy.quantity > 0 and buy.id in self.market.listings:
+            sells = [s for s in self.market.sell_listings_for(buy.item_id) if s.price <= buy.price]
+            if not sells:
+                break
+            sell = sells[0]
+            if sell.owner_kind == buy.owner_kind and sell.owner_id == buy.owner_id:
+                break
+            take = min(buy.quantity, sell.quantity)
+            cost = take * sell.price
+            # Release escrow at buy.price, pay seller sell.price, refund difference
+            reserved = take * buy.price
+            if not self.market.escrow_take(buy.owner_kind, buy.owner_id, reserved):
+                break
+            if self.market.inventory.get(sell.item_id) < take:
+                self.market.escrow_add(buy.owner_kind, buy.owner_id, reserved)
+                break
+            self.market.inventory.add(sell.item_id, -take)
+            buyer.inventory.add(buy.item_id, take)
+            seller = self.get_actor(sell.owner_kind, sell.owner_id)
+            seller.cash += cost
+            refund = reserved - cost
+            if refund:
+                buyer.cash += refund
+            sell.quantity -= take
+            buy.quantity -= take
+            fills.append({"sell_id": sell.id, "qty": take, "price": sell.price})
+            if sell.quantity <= 0:
+                self.market.remove_listing(sell.id)
+        if buy.quantity <= 0 and buy.id in self.market.listings:
+            self.market.remove_listing(buy.id)
+        return fills
+
+    def _match_buys_against_sell(self, sell: Listing) -> list[dict]:
+        matched: list[dict] = []
+        while sell.quantity > 0 and sell.id in self.market.listings:
+            buys = [b for b in self.market.buy_listings_for(sell.item_id) if b.price >= sell.price]
+            if not buys:
+                break
+            buy = buys[0]
+            if buy.owner_kind == sell.owner_kind and buy.owner_id == sell.owner_id:
+                break
+            before = buy.quantity
+            fills = self._fill_buy_listing(buy)
+            if not fills:
+                break
+            matched.extend(fills)
+            if buy.quantity == before:
+                break
+        return matched
 
     def set_paused(self, paused: bool) -> ActionResult:
         self.paused = paused
         return ActionResult(True, "paused" if paused else "resumed")
 
+    def pass_turn(self, owner_kind: str, owner_id: str) -> ActionResult:
+        """Explicit no-op action so an agent can finish the day."""
+        self.get_actor(owner_kind, owner_id)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(True, "Passed")
+
     def to_public_dict(self) -> dict:
         return {
+            "day": self.day,
             "time_sec": round(self.time_sec, 2),
             "tick_index": self.tick_index,
             "paused": self.paused,
             "player_company_id": self.player_company_id,
+            "current_turn": self.current_turn_token(),
             "companies": [c.to_public_dict() for c in self.companies.values()],
+            "market": self.market.to_public_dict(),
             "content": self.content.to_public_dict(),
             "map": self.grid.to_public_dict(),
         }

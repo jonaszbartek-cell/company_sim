@@ -1,15 +1,15 @@
 # company_sim
 
-Real-time company economic simulator (Python + Web UI).
+Company economic simulator (Python + Web UI) with local LLM rivals.
 
-**City** and **Company** both inherit from **Actor** and share the same Action API. AI rivals (companies + cities) can be driven by a **local LLM** with tools (one model, many minds). Target: RTX 3050-class PCs.
+**Now:** 1 player + 2 AI companies + 1 city agent. Day-based turns, indexed market, text-file saves for LLM context.
 
 ## Docs
 
 - [docs/DESIGN.md](docs/DESIGN.md)
-- [docs/CLASSES.md](docs/CLASSES.md) — domain classes (`Actor`, `Item`, `Plot`, `Building`, …)
-- [data/README.md](data/README.md) — how to add items / buildings / recipes in YAML
-- [docs/LLM.md](docs/LLM.md) — enable Ollama / tool bridge
+- [docs/CLASSES.md](docs/CLASSES.md)
+- [data/README.md](data/README.md)
+- [docs/LLM.md](docs/LLM.md)
 
 ## Run (dev)
 
@@ -30,17 +30,17 @@ export COMPANY_SIM_LLM_MODEL=qwen2.5:3b-instruct
 PYTHONPATH=src python -m company_sim
 ```
 
-Without LLM env vars, AI uses heuristics (game still runs).
-
 ### What works now
 
-- Actor base class → Company / City
-- Real-time tick + pause; pre-generated map; road-access invariant
-- Player: buy / build / road / merge
-- LLM tools → same Action API as the UI (Ollama-compatible)
+- Agent base → Company / City
+- Day advances when all companies have acted (slowable AI turns)
+- Market: post sell/buy, buy lowest-price listings
+- Produce action on foundries (iron+coal+energy → steel)
+- Text saves under `saves/` (world, market, per-agent) for LLM context
+- Sequential LLM/heuristic engine: one agent, then the next
 
 ### Controls
 
-- Click plot → Buy / Build / Build road
-- Two adjacent owned plots → Merge with last
-- Pause / Resume
+- Click plot → Buy / Build / Produce / Road / Merge
+- Market: Buy 1 iron / Sell 1 steel
+- Pass day / Pause
