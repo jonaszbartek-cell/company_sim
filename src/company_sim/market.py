@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Literal
-import itertools
 
 from company_sim.items import Inventory
 
@@ -57,13 +56,18 @@ class Market:
     inventory: Inventory = field(default_factory=Inventory)
     escrow_cash: dict[str, int] = field(default_factory=dict)  # "kind:id" → reserved cash
     listings: dict[int, Listing] = field(default_factory=dict)
-    _next_id: itertools.count = field(default_factory=lambda: itertools.count(1))
+    _next_id_value: int = 1
 
     def _actor_key(self, kind: str, actor_id: str) -> str:
         return f"{kind}:{actor_id}"
 
     def next_id(self) -> int:
-        return next(self._next_id)
+        lid = self._next_id_value
+        self._next_id_value += 1
+        return lid
+
+    def peek_next_id(self) -> int:
+        return self._next_id_value
 
     def sell_listings_for(self, item_id: str) -> list[Listing]:
         rows = [L for L in self.listings.values() if L.side == "sell" and L.item_id == item_id]
@@ -113,13 +117,17 @@ class Market:
             "sell_listings": [L.to_public_dict() for L in sells],
             "buy_listings": [L.to_public_dict() for L in buys],
             "listing_count": len(self.listings),
+            "next_listing_id": self.peek_next_id(),
         }
 
     def to_text(self) -> str:
+        """Raw market text (persistence may wrap with file: header)."""
         lines = [
             "=== MARKET ===",
             f"inventory: {self.inventory.as_dict() or '{}'}",
             f"escrow_cash: {self.escrow_cash or '{}'}",
+            f"listing_count: {len(self.listings)}",
+            f"next_listing_id: {self.peek_next_id()}",
             "",
             "-- sell listings (lowest price first per item) --",
         ]

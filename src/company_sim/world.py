@@ -233,10 +233,13 @@ class World:
         self.tick_index += 1
 
     def note_actor_action(self, kind: str, actor_id: str) -> None:
-        """Mark that this actor took an action this day; maybe advance the day."""
+        """Mark that this actor took an action this day; persist; maybe advance day."""
         actor = self.get_actor(kind, actor_id)
         actor.mark_acted()
         self._maybe_advance_day()
+        # Always persist after a state-changing action (day advance may have
+        # already saved; saving again is cheap and keeps files current).
+        self.persistence.save_all(self)
 
     def _maybe_advance_day(self) -> None:
         """One game day passes when ALL companies have made an action."""
@@ -248,7 +251,6 @@ class World:
             for actor in self.iter_all_actors():
                 actor.reset_day()
             self._idle_all_buildings()
-            self.persistence.save_all(self)
 
     def _idle_all_buildings(self) -> None:
         for t in self.grid.tiles:

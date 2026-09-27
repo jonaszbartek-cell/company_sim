@@ -119,9 +119,19 @@ for agent in [ai_1, ai_2, city_a]  # sequential
   save world.txt + market.txt + agents/*.txt
   LLM loads world + market + agents/<this>.txt
   LLM tools → Action API
-  mark acted → maybe advance day
+  mark acted → save_all → maybe advance day
   next agent
 ```
+
+Every state-changing action calls `persistence.save_all` so files stay current.
+
+### File contracts
+
+| File | Contains | Must not contain |
+|------|----------|------------------|
+| `saves/world.txt` | day, map, roster ids, turn queue, plot ownership map | agent cash/inventory, market listings |
+| `saves/market.txt` | market inventory, escrow, indexed listings | agent private state, plots |
+| `saves/agents/<id>.txt` | that agent's cash/inventory/plots/buildings + their open listings | other agents' private state, full market book |
 
 `min_seconds_between_turns` slows the wall clock between AI turns; it never compresses a day.
 
