@@ -5,19 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
+from company_sim.items import Inventory
+
 ActorKind = Literal["company", "city"]
-
-
-# PLACEHOLDER production method — replace with data files later
-PLACEHOLDER_METHODS: dict[str, dict] = {
-    "basic_goods": {
-        "id": "basic_goods",
-        "name": "Basic Goods",
-        "inputs": {"materials": 1},
-        "outputs": {"goods": 1},
-        "duration_sec": 5.0,
-    }
-}
 
 
 @dataclass
@@ -32,7 +22,7 @@ class Actor:
     id: str
     name: str
     cash: int = 1000
-    inventory: dict[str, int] = field(default_factory=dict)
+    inventory: Inventory = field(default_factory=Inventory)
 
     @property
     def kind(self) -> ActorKind:
@@ -44,7 +34,7 @@ class Actor:
             "name": self.name,
             "kind": self.kind,
             "cash": self.cash,
-            "inventory": dict(self.inventory),
+            "inventory": self.inventory.as_dict(),
         }
 
 
@@ -53,8 +43,10 @@ class Company(Actor):
     is_player: bool = False
 
     def __post_init__(self) -> None:
-        if not self.inventory:
-            self.inventory = {"materials": 20, "goods": 0}
+        if isinstance(self.inventory, dict):
+            self.inventory = Inventory(self.inventory)
+        if not self.inventory.quantities:
+            self.inventory = Inventory({"materials": 20, "goods": 0})
 
     @property
     def kind(self) -> ActorKind:
@@ -79,8 +71,10 @@ class City(Actor):
     territory: list[tuple[int, int]] = field(default_factory=list)
 
     def __post_init__(self) -> None:
-        if not self.inventory:
-            self.inventory = {"materials": 20, "goods": 0}
+        if isinstance(self.inventory, dict):
+            self.inventory = Inventory(self.inventory)
+        if not self.inventory.quantities:
+            self.inventory = Inventory({"materials": 20, "goods": 0})
 
     @property
     def kind(self) -> ActorKind:

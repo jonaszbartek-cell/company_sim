@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from company_sim.actions import ActionError
 from company_sim.ai.scheduler import AIScheduler
-from company_sim.map_grid import BuildingType
+from company_sim.plots import BuildingType
 from company_sim.world import World, WorldConfig
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"

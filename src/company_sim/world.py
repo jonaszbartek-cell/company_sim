@@ -5,8 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from company_sim.actions import ActionError, ActionResult
-from company_sim.actors import PLACEHOLDER_METHODS, Actor, ActorKind, Company
-from company_sim.map_grid import Building, BuildingType, GridMap, TileKind, generate_map
+from company_sim.actors import Actor, ActorKind, Company
+from company_sim.items import Inventory, ItemCatalog, load_default_catalog
+from company_sim.map_grid import GridMap, TileKind, generate_map
+from company_sim.plots import Building, BuildingType
+from company_sim.production import ProductionCatalog, load_default_production
 
 
 @dataclass
@@ -25,6 +28,8 @@ class WorldConfig:
 class World:
     config: WorldConfig
     grid: GridMap
+    items: ItemCatalog
+    production: ProductionCatalog
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
     time_sec: float = 0.0
@@ -34,6 +39,9 @@ class World:
     @classmethod
     def new_game(cls, config: WorldConfig | None = None) -> World:
         config = config or WorldConfig()
+        items = load_default_catalog()
+        production = load_default_production(items)
+
         seeds = [
             ("city_a", "Northport", 8, 6, 800),
             ("city_b", "Millhaven", 30, 7, 950),
@@ -48,14 +56,14 @@ class World:
             city_seeds=seeds,
             road_stride=config.road_stride,
         )
-        world = cls(config=config, grid=grid)
+        world = cls(config=config, grid=grid, items=items, production=production)
 
         player = Company(
             id="player",
             name="Player Co",
             is_player=True,
             cash=config.player_starting_cash,
-            inventory={"materials": 40, "goods": 5},
+            inventory=Inventory({"materials": 40, "goods": 5}),
         )
         world.companies[player.id] = player
         world.player_company_id = player.id
@@ -68,7 +76,7 @@ class World:
                 name=f"Rival {i+1}",
                 is_player=False,
                 cash=1500,
-                inventory={"materials": 15, "goods": 0},
+                inventory=Inventory({"materials": 15, "goods": 0}),
             )
 
         for city in grid.cities.values():
@@ -130,8 +138,7 @@ class World:
             return
         candidates.sort(key=lambda t: t[0])
         tile = candidates[0][1]
-        tile.plot.owner_kind = owner_kind
-        tile.plot.owner_id = owner_id
+        tile.plot.claim(owner_kind, owner_id)
         tile.plot.price = 0
         self.grid.register_single_parcel(tile.x, tile.y)
 
@@ -143,8 +150,6 @@ class World:
         self._tick_production(dt)
 
     def _tick_production(self, dt: float) -> None:
-        method = PLACEHOLDER_METHODS["basic_goods"]
-        duration = float(method["duration_sec"])
         for tile in self.grid.tiles:
             if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
                 continue
@@ -152,23 +157,20 @@ class World:
             if not b.production_method_id:
                 continue
             try:
+                method = self.production.get(b.production_method_id)
                 actor = self.get_actor(b.owner_kind, b.owner_id)
-            except ActionError:
+            except (ActionError, KeyError):
                 continue
             bonus = self.grid.production_bonus_for_plot(tile.plot)
-            b.progress += (dt / duration) * bonus
+            b.progress += (dt / method.duration_sec) * bonus
             while b.progress >= 1.0:
+                if not actor.inventory.has(method.inputs):
+                    # Stall progress at 1.0 until inputs available
+                    b.progress = 1.0
+                    break
+                actor.inventory.consume(method.inputs)
+                actor.inventory.produce(method.outputs)
                 b.progress -= 1.0
-                self._try_complete_batch(actor.inventory, method)
-
-    def _try_complete_batch(self, inventory: dict[str, int], method: dict) -> None:
-        for good, qty in method["inputs"].items():
-            if inventory.get(good, 0) < qty:
-                return
-        for good, qty in method["inputs"].items():
-            inventory[good] = inventory.get(good, 0) - qty
-        for good, qty in method["outputs"].items():
-            inventory[good] = inventory.get(good, 0) + qty
 
     def buy_plot(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
@@ -177,7 +179,7 @@ class World:
         tile = self.grid.get(x, y)
         if tile.kind != TileKind.PLOT or tile.plot is None:
             raise ActionError("Not a buyable plot")
-        if tile.plot.owner_id is not None:
+        if tile.plot.is_owned:
             raise ActionError("Plot already owned")
         if not self.grid.is_road_access(x, y):
             raise ActionError("Plot has no road access")
@@ -185,8 +187,7 @@ class World:
         if actor.cash < price:
             raise ActionError("Not enough cash")
         actor.cash -= price
-        tile.plot.owner_kind = owner_kind
-        tile.plot.owner_id = owner_id
+        tile.plot.claim(owner_kind, owner_id)
         self.grid.register_single_parcel(x, y)
         return ActionResult(True, f"Bought plot ({x},{y}) for {price}", {"x": x, "y": y, "price": price})
 
@@ -202,19 +203,25 @@ class World:
         tile = self.grid.get(x, y)
         if tile.kind != TileKind.PLOT or not tile.plot:
             raise ActionError("Not a plot")
-        if tile.plot.owner_kind != owner_kind or tile.plot.owner_id != owner_id:
+        if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
         if tile.plot.building is not None:
             raise ActionError("Plot already has a building")
         cost = 200  # PLACEHOLDER
         if actor.cash < cost:
             raise ActionError("Not enough cash")
+        # Default method: first allowed for this building type
+        method_id = None
+        for method in self.production.all():
+            if building_type.value in method.allowed_building_types:
+                method_id = method.id
+                break
         actor.cash -= cost
         tile.plot.building = Building(
             building_type=building_type,
             owner_kind=owner_kind,
             owner_id=owner_id,
-            production_method_id="basic_goods",
+            production_method_id=method_id,
         )
         return ActionResult(True, f"Built {building_type.value} at ({x},{y})", {"cost": cost})
 
@@ -243,12 +250,7 @@ class World:
         self.get_actor(owner_kind, owner_id)
         for x, y in ((x1, y1), (x2, y2)):
             tile = self.grid.get(x, y)
-            if (
-                tile.plot
-                and tile.plot.owner_kind == owner_kind
-                and tile.plot.owner_id == owner_id
-                and not tile.plot.parcel_id
-            ):
+            if tile.plot and tile.plot.owned_by(owner_kind, owner_id) and not tile.plot.parcel_id:
                 self.grid.register_single_parcel(x, y)
         try:
             parcel_id = self.grid.merge_plots(owner_kind, owner_id, x1, y1, x2, y2)
@@ -268,5 +270,7 @@ class World:
             "paused": self.paused,
             "player_company_id": self.player_company_id,
             "companies": [c.to_public_dict() for c in self.companies.values()],
+            "items": self.items.to_public_dict(),
+            "production_methods": self.production.to_public_dict(),
             "map": self.grid.to_public_dict(),
         }
