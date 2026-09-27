@@ -1,0 +1,9 @@
+items:
+  - id: materials
+    name: Materials
+    category: raw
+    description: PLACEHOLDER generic input good
+  - id: goods
+    name: Goods
+    category: finished
+    description: PLACEHOLDER generic output good

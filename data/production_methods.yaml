@@ -1,0 +1,10 @@
+production_methods:
+  - id: basic_goods
+    name: Basic Goods
+    inputs:
+      materials: 1
+    outputs:
+      goods: 1
+    duration_sec: 5
+    allowed_building_types:
+      - workshop

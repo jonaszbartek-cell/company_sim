@@ -56,7 +56,7 @@ Plot: type, owner (company|city|none), building?, parcel?
 
 Ownership: `owner_kind` + `owner_id`. LLM tools and player UI share the World Action API.
 
-See also [LLM.md](LLM.md) for local model wiring.
+See also [LLM.md](LLM.md) for local model wiring and [CLASSES.md](CLASSES.md) for the domain class map.
 
 ---
 

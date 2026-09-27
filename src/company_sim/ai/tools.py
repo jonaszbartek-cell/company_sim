@@ -8,7 +8,8 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from company_sim.actions import ActionError
-from company_sim.map_grid import BuildingType, TileKind
+from company_sim.map_grid import TileKind
+from company_sim.plots import BuildingType
 
 if TYPE_CHECKING:
     from company_sim.actors import Actor
@@ -156,7 +157,7 @@ def build_actor_context(world: World, actor: Actor) -> str:
         f"You are {actor.kind} '{actor.name}' (id={actor.id}).\n"
         f"Game time: {world.time_sec:.1f}s\n"
         f"Cash: {actor.cash}\n"
-        f"Inventory: {actor.inventory}\n"
+        f"Inventory: {actor.inventory.as_dict()}\n"
         f"Road build cost: {world.config.road_build_cost}\n"
         f"Owned plots ({len(owned)}):\n"
         + ("\n".join(owned_lines) if owned_lines else "  (none)")
@@ -216,7 +217,7 @@ class ToolExecutor:
                     "id": aid,
                     "name": self.actor.name,
                     "cash": self.actor.cash,
-                    "inventory": dict(self.actor.inventory),
+                    "inventory": dict(self.actor.inventory.as_dict()),
                     "owned_plot_count": len(owned),
                     "owned_plots": [
                         {
