@@ -85,11 +85,18 @@ class GamePersistence:
         world.mailboxes.ensure_all_pairs(world.iter_all_actors())
         return world.mailboxes.save_all()
 
+    def save_proposals(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.root / "proposals.txt"
+        path.write_text(world.proposals.to_text(), encoding="utf-8")
+        return path
+
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + every agent + all mailboxes."""
+        """Write world + market + every agent + all mailboxes + proposals."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
+            "proposals": self.save_proposals(world),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)
@@ -100,22 +107,33 @@ class GamePersistence:
     def load_context_for_agent(self, world: World, actor: Actor) -> str:
         """
         Refresh all saves, then return the bundle for this agent:
-        world.txt + market.txt + agents/<this>.txt + this agent's mailboxes.
+        world + market + proposals + agents/<this>.txt + this agent's mailboxes.
         """
         self.save_all(world)
         world_txt = self.world_path().read_text(encoding="utf-8")
         market_txt = self.market_path().read_text(encoding="utf-8")
+        proposals_txt = (self.root / "proposals.txt").read_text(encoding="utf-8")
         agent_txt = self.agent_path(actor.id).read_text(encoding="utf-8")
         mail_txt = ""
         if world.mailboxes is not None:
             mail_txt = world.mailboxes.render_for_agent(actor.kind, actor.id)
+        # Filter proposals text to this agent's pending involvements (full file still on disk)
+        mine = world.proposals.pending_for(actor.kind, actor.id)
+        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
+        if mine:
+            mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
+        else:
+            mine_txt += "(none)\n"
         return (
             f"{world_txt}"
             f"{market_txt}"
+            f"{proposals_txt}"
+            f"{mine_txt}\n"
             f"{agent_txt}"
             f"{mail_txt}"
             "---\n"
-            "You control ONLY the agent above. Use tools to act (including send_message), then call done.\n"
+            "You control ONLY the agent above. Use tools to act "
+            "(market orders, retract, direct propose_sell/propose_buy, send_message), then call done.\n"
         )
 
     # --- renderers (one concern each) ------------------------------------

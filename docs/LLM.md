@@ -52,6 +52,9 @@ Without `COMPANY_SIM_LLM=1`, AI uses heuristics (game still runs).
 | `list_unowned_plots` | Nearby unowned plots |
 | `buy_plot` / `build_building` / `produce` | Core loop |
 | `post_sell` / `post_buy` / `buy_from_market` | Market |
+| `retract_sell` / `retract_buy` | Cancel own market orders |
+| `propose_sell` / `propose_buy` | Direct AGENT↔AGENT proposals |
+| `list_proposals` / `accept_proposal` / `reject_proposal` | Resolve proposals |
 | `set_production_method` | Choose recipe |
 | `build_road` / `merge_plots` | Map |
 | `list_contacts` / `read_mail` / `send_message` | Mail |
