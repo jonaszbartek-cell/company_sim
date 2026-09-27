@@ -7,8 +7,6 @@ from pathlib import Path
 
 import yaml
 
-from company_sim.items import ItemCatalog
-
 
 @dataclass(frozen=True)
 class BuildingDefinition:
