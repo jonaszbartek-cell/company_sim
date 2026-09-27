@@ -25,7 +25,8 @@ Market
 | `Plot` / `Parcel` | Land + merge size | location on Tile `(x,y)` |
 | `Market` / `Listing` | Indexed orders | lowest-price buys |
 | `MailboxStore` | Pairwise text mail | C(n,2) files at startup |
-| `GamePersistence` | Text saves | world / market / agents / mailboxes |
+| `ProposalBook` / `DirectProposal` | Direct trades | goods/cash reserved |
+| `GamePersistence` | Text saves | world / market / agents / mail / proposals |
 | `World` | Day loop + actions | |
 | `GameContent` | YAML load + validate | |
 
