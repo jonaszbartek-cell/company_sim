@@ -35,6 +35,18 @@ class PauseBody(BaseModel):
     paused: bool
 
 
+class RoadBody(BaseModel):
+    x: int
+    y: int
+
+
+class MergeBody(BaseModel):
+    x1: int
+    y1: int
+    x2: int
+    y2: int
+
+
 def create_app() -> FastAPI:
     world = World.new_game(WorldConfig())
     scheduler = AIScheduler()
@@ -89,6 +101,24 @@ def create_app() -> FastAPI:
         except (ActionError, ValueError) as exc:
             msg = exc.message if isinstance(exc, ActionError) else str(exc)
             return {"ok": False, "message": msg}
+
+    @app.post("/api/player/build_road")
+    def build_road(body: RoadBody) -> dict[str, Any]:
+        try:
+            result = world.company_build_road(world.player_company_id, body.x, body.y)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/merge_plots")
+    def merge_plots(body: MergeBody) -> dict[str, Any]:
+        try:
+            result = world.merge_plots(
+                world.player_company_id, body.x1, body.y1, body.x2, body.y2
+            )
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
 
     @app.websocket("/ws")
     async def ws_endpoint(ws: WebSocket) -> None:

@@ -8,9 +8,12 @@ const aiLog = document.getElementById("ai-log");
 const btnPause = document.getElementById("btn-pause");
 const btnBuy = document.getElementById("btn-buy");
 const btnBuild = document.getElementById("btn-build");
+const btnRoad = document.getElementById("btn-road");
+const btnMerge = document.getElementById("btn-merge");
 
 let state = null;
 let selected = null; // {x,y}
+let lastOwnedClick = null; // for merge
 let cellSize = 20;
 
 function resize() {
@@ -37,7 +40,6 @@ function draw() {
   ctx.fillStyle = "#0e1317";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // faint grid
   ctx.strokeStyle = "rgba(255,255,255,0.03)";
   ctx.beginPath();
   for (let x = 0; x <= width; x++) {
@@ -59,6 +61,7 @@ function draw() {
       if (t.plot?.building) ctx.fillStyle = "#c47a4a";
       else if (t.plot?.owner_company_id === state.player_company_id) ctx.fillStyle = "#2f8f6b";
       else if (t.plot?.owner_company_id) ctx.fillStyle = "#6b3f5a";
+      else if (t.plot?.plot_type === "specialized") ctx.fillStyle = "#4a6b3f";
       else ctx.fillStyle = "#3f6b4f";
     } else continue;
     ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
@@ -68,11 +71,18 @@ function draw() {
       ctx.font = `${Math.max(9, cellSize * 0.45)}px sans-serif`;
       ctx.fillText("C", px + 4, py + cellSize - 4);
     }
+    if (t.plot?.plot_type === "specialized" && !t.plot.building && !t.plot.owner_company_id) {
+      ctx.fillStyle = "rgba(255,220,120,0.35)";
+      ctx.fillRect(px + 2, py + 2, 3, 3);
+    }
+    if (t.plot?.parcel_size > 1) {
+      ctx.strokeStyle = "rgba(125, 209, 255, 0.7)";
+      ctx.strokeRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
+    }
     if (t.plot?.building) {
       ctx.fillStyle = "#1a1008";
       ctx.font = `${Math.max(9, cellSize * 0.4)}px sans-serif`;
       ctx.fillText("B", px + 3, py + cellSize - 3);
-      // production bar
       const p = t.plot.building.progress || 0;
       ctx.fillStyle = "rgba(0,0,0,0.45)";
       ctx.fillRect(px + 2, py + 2, cellSize - 4, 3);
@@ -90,7 +100,6 @@ function draw() {
     ctx.lineWidth = 1;
   }
 
-  // city labels
   ctx.fillStyle = "#e7eef2";
   ctx.font = "12px sans-serif";
   for (const c of state.map.cities) {
@@ -109,9 +118,11 @@ function refreshPanels() {
   btnPause.textContent = state.paused ? "Resume" : "Pause";
 
   if (!selected) {
-    selectedEl.textContent = "Click a plot";
+    selectedEl.textContent = "Click a plot / road candidate";
     btnBuy.disabled = true;
     btnBuild.disabled = true;
+    btnRoad.disabled = true;
+    btnMerge.disabled = true;
     return;
   }
   const t = tileAt(selected.x, selected.y);
@@ -123,8 +134,25 @@ function refreshPanels() {
     t.plot &&
     t.plot.owner_company_id === state.player_company_id &&
     !t.plot.building;
+  const canRoad =
+    t &&
+    ((t.kind === "plot" && t.plot && !t.plot.owner_company_id) || t.kind === "empty");
+  let canMerge = false;
+  if (
+    lastOwnedClick &&
+    t &&
+    t.kind === "plot" &&
+    t.plot &&
+    t.plot.owner_company_id === state.player_company_id &&
+    !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)
+  ) {
+    const dist = Math.abs(lastOwnedClick.x - selected.x) + Math.abs(lastOwnedClick.y - selected.y);
+    canMerge = dist === 1;
+  }
   btnBuy.disabled = !canBuy;
   btnBuild.disabled = !canBuild;
+  btnRoad.disabled = !canRoad;
+  btnMerge.disabled = !canMerge;
 }
 
 function applyPayload(payload) {
@@ -147,19 +175,24 @@ canvas.addEventListener("click", (ev) => {
   const x = Math.floor((mx - ox) / cellSize);
   const y = Math.floor((my - oy) / cellSize);
   if (x < 0 || y < 0 || x >= width || y >= height) return;
+  const prev = selected;
   selected = { x, y };
+  const t = tileAt(x, y);
+  if (t && t.kind === "plot" && t.plot && t.plot.owner_company_id === state.player_company_id) {
+    if (prev && (prev.x !== x || prev.y !== y)) lastOwnedClick = prev;
+    else if (!lastOwnedClick) lastOwnedClick = { x, y };
+  }
   refreshPanels();
   draw();
 });
 
 btnPause.addEventListener("click", async () => {
   const paused = !(state && state.paused);
-  const res = await fetch("/api/pause", {
+  await fetch("/api/pause", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ paused }),
   });
-  await res.json();
 });
 
 btnBuy.addEventListener("click", async () => {
@@ -184,12 +217,39 @@ btnBuild.addEventListener("click", async () => {
   if (!data.ok) alert(data.message);
 });
 
+btnRoad.addEventListener("click", async () => {
+  if (!selected) return;
+  const res = await fetch("/api/player/build_road", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(selected),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnMerge.addEventListener("click", async () => {
+  if (!selected || !lastOwnedClick) return;
+  const res = await fetch("/api/player/merge_plots", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      x1: lastOwnedClick.x,
+      y1: lastOwnedClick.y,
+      x2: selected.x,
+      y2: selected.y,
+    }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+  else lastOwnedClick = selected;
+});
+
 function connect() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   const ws = new WebSocket(`${proto}://${location.host}/ws`);
   ws.onmessage = (ev) => applyPayload(JSON.parse(ev.data));
   ws.onclose = () => setTimeout(connect, 1000);
-  // keepalive ping
   setInterval(() => {
     if (ws.readyState === WebSocket.OPEN) ws.send("ping");
   }, 15000);

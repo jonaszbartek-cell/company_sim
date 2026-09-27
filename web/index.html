@@ -23,11 +23,18 @@
           <button id="btn-buy" type="button" disabled>Buy plot</button>
           <button id="btn-build" type="button" disabled>Build workshop</button>
         </div>
+        <div class="row">
+          <button id="btn-road" type="button" disabled>Build road</button>
+          <button id="btn-merge" type="button" disabled>Merge with last</button>
+        </div>
         <h2>Inventory</h2>
         <pre id="inventory">—</pre>
         <h2>AI (stub)</h2>
         <pre id="ai-log">—</pre>
-        <p class="hint">PLACEHOLDER economy. Roads expand from cities; plots appear beside roads.</p>
+        <p class="hint">
+          Map is generated at start (roads + standard/specialized plots; every plot touches a road).
+          Own adjacent plots can be merged for a production bonus. Cities and companies can build roads.
+        </p>
       </aside>
     </main>
   </div>
