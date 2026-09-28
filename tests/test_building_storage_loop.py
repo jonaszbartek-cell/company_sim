@@ -386,3 +386,43 @@ def test_combine_same_building_merges_storage_and_size():
         assert b is w.grid.get(2, 1).plot.building
         assert b.footprint_w == 2 and b.footprint_h == 1
         assert b.storage.get("coal") == 2
+
+
+def test_build_and_combine_art_paths_and_roads_coexist():
+    """Build/combine pick sized map art; roads work with buildings on outer edges."""
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        for x, y in ((1, 1), (2, 1)):
+            w.grid.get(x, y).plot.claim("company", "player")
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 40)
+        player.inventory.set("steel", 5)
+        player.cash = 5000
+
+        # Road first, then build — both remain
+        w.build_road("company", "player", 1, 1, "N")
+        player.acted_this_day = False
+        built = w.build_building("company", "player", 1, 1, "foundry")
+        assert built.ok
+        b = w.grid.get(1, 1).plot.building
+        assert b.map_art_path().endswith("/foundry/1x1.svg")
+        assert w.grid.get(1, 1).plot.roads["N"] is True
+        assert w.grid.road_mask_at(1, 1) == 1  # N bit
+
+        # Expand onto empty neighbor → art becomes 2x1; outer road kept
+        player.acted_this_day = False
+        merged = w.merge_plots("company", "player", 1, 1, 2, 1)
+        assert merged.ok
+        b = w.grid.get(1, 1).plot.building
+        assert b.footprint_w == 2 and b.footprint_h == 1
+        assert b.map_art_path().endswith("/foundry/2x1.svg")
+        assert Path(__file__).resolve().parents[1].joinpath(
+            "web/assets/buildings/map/foundry/2x1.svg"
+        ).is_file()
+        assert w.grid.get(1, 1).plot.roads["N"] is True
+
+        # Road still allowed on non-combined outer edge of building plot
+        player.acted_this_day = False
+        road2 = w.build_road("company", "player", 2, 1, "S")
+        assert road2.ok
+        assert w.grid.get(2, 1).plot.building is b
