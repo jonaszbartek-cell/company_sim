@@ -25,7 +25,7 @@ CITY_NAMES = ["Millhaven", "Northport", "Riverbend", "Oakridge", "Southgate", "E
 
 @dataclass
 class WorldConfig:
-    map_size: int = 12  # plots per side (square map)
+    map_size: int = 12  # plots per side; maps are always square rectangles (NxN)
     tick_hz: float = 4.0
     starting_cities: int = 1
     ai_company_count: int = 2
@@ -38,7 +38,7 @@ class WorldConfig:
     # If > 0, seed market with this many of EVERY catalog item at market_seed_price
     market_seed_qty: int = 0
     market_seed_price: int = 1
-    # Deprecated aliases (tests / older callers); folded into map_size in __post_init__
+    # Deprecated aliases (tests / older callers); folded into square map_size = max(w, h)
     map_width: int | None = None
     map_height: int | None = None
 
