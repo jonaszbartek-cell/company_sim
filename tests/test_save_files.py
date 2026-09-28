@@ -134,13 +134,12 @@ def test_sell_writes_listing_to_market_and_agent():
 
         agent_txt = (root / "agents" / "ai_1.txt").read_text(encoding="utf-8")
         assert "sell 2x steel @ 33/u" in agent_txt
-        # Inventory in agent file reflects goods leaving to market
         assert "'steel': 2" in agent_txt or '"steel": 2' in agent_txt or "steel': 2" in agent_txt
 
-        # Other agent file must not show ai_1's listing as "my" listings section content
-        # (it may appear only in market.txt)
+        # Other agent's "my market listings" must not include ai_1's steel sell
         other = (root / "agents" / "ai_2.txt").read_text(encoding="utf-8")
-        assert "-- my market listings (0) --" in other or "(none)" in other.split("-- my market listings")[1]
+        assert "steel @ 33/u by company:ai_1" not in other
+        assert "sell 2x steel @ 33/u" not in other.split("-- my market listings")[1].split("-- mail")[0]
 
 
 def test_day_advance_persists_new_day():

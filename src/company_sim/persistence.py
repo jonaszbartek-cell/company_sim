@@ -91,12 +91,19 @@ class GamePersistence:
         path.write_text(world.proposals.to_text(), encoding="utf-8")
         return path
 
+    def save_government_contracts(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.root / "government_contracts.txt"
+        path.write_text(world.gov_contracts.to_text(), encoding="utf-8")
+        return path
+
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + every agent + all mailboxes + proposals."""
+        """Write world + market + agents + mailboxes + proposals + gov contracts."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
             "proposals": self.save_proposals(world),
+            "government_contracts": self.save_government_contracts(world),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)
@@ -106,34 +113,45 @@ class GamePersistence:
 
     def load_context_for_agent(self, world: World, actor: Actor) -> str:
         """
-        Refresh all saves, then return the bundle for this agent:
-        world + market + proposals + agents/<this>.txt + this agent's mailboxes.
+        Refresh all saves, then return the bundle for this agent.
+        Cities get gov-contract context (no market trading instructions).
         """
         self.save_all(world)
         world_txt = self.world_path().read_text(encoding="utf-8")
         market_txt = self.market_path().read_text(encoding="utf-8")
         proposals_txt = (self.root / "proposals.txt").read_text(encoding="utf-8")
+        gov_txt = (self.root / "government_contracts.txt").read_text(encoding="utf-8")
         agent_txt = self.agent_path(actor.id).read_text(encoding="utf-8")
         mail_txt = ""
         if world.mailboxes is not None:
             mail_txt = world.mailboxes.render_for_agent(actor.kind, actor.id)
-        # Filter proposals text to this agent's pending involvements (full file still on disk)
         mine = world.proposals.pending_for(actor.kind, actor.id)
         mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
         if mine:
             mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
         else:
             mine_txt += "(none)\n"
+        if actor.kind == "city":
+            hint = (
+                "You are a CITY. You cannot use the market. "
+                "Procure goods via post_government_contract / award_government_contract. "
+                "Then call done.\n"
+            )
+        else:
+            hint = (
+                "You are a COMPANY. Use the market, direct proposals, and "
+                "bid_government_contract / fulfill_government_contract. Then call done.\n"
+            )
         return (
             f"{world_txt}"
             f"{market_txt}"
+            f"{gov_txt}"
             f"{proposals_txt}"
             f"{mine_txt}\n"
             f"{agent_txt}"
             f"{mail_txt}"
             "---\n"
-            "You control ONLY the agent above. Use tools to act "
-            "(market orders, retract, direct propose_sell/propose_buy, send_message), then call done.\n"
+            f"You control ONLY the agent above. {hint}"
         )
 
     # --- renderers (one concern each) ------------------------------------

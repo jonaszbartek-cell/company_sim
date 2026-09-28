@@ -145,7 +145,16 @@ Every state-changing action calls `persistence.save_all` so files stay current.
 | Direct sell proposal | Reserved from proposer | On accept: buyer → seller |
 | Direct buy proposal | On accept: seller → buyer | Reserved from proposer; paid on accept |
 
-`saves/proposals.txt` holds pending direct proposals.
+**Cities cannot use the market.** They procure via government contracts:
+
+1. City `post_government_contract` with required resources/qty (visible to all companies)  
+2. Companies `bid_government_contract` with a total price  
+3. City `award_government_contract` → **lowest bid wins**; city cash escrowed  
+4. Winner gathers goods → `fulfill_government_contract` → goods to city, escrow → company  
+
+`saves/government_contracts.txt` + `saves/proposals.txt` hold these boards.
+
+`min_seconds_between_turns` slows the wall clock between AI turns; it never compresses a day.
 
 ---
 

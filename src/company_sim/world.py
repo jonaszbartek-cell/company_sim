@@ -9,6 +9,7 @@ from company_sim.actions import ActionError, ActionResult
 from company_sim.actors import Actor, ActorKind, Company
 from company_sim.buildings import Building
 from company_sim.content import GameContent
+from company_sim.contracts import ContractBid, GovernmentContract, GovernmentContractBook
 from company_sim.items import Inventory
 from company_sim.mailboxes import MailboxStore, actor_key, parse_actor_key
 from company_sim.map_grid import GridMap, TileKind, generate_map
@@ -43,6 +44,7 @@ class World:
     content: GameContent
     market: Market = field(default_factory=Market)
     proposals: ProposalBook = field(default_factory=ProposalBook)
+    gov_contracts: GovernmentContractBook = field(default_factory=GovernmentContractBook)
     mailboxes: MailboxStore | None = None
     companies: dict[str, Company] = field(default_factory=dict)
     player_company_id: str = "player"
@@ -89,6 +91,7 @@ class World:
             content=content,
             market=Market(),
             proposals=ProposalBook(),
+            gov_contracts=GovernmentContractBook(),
             mailboxes=MailboxStore(root=save_root),
             persistence=GamePersistence(save_root),
         )
@@ -133,12 +136,15 @@ class World:
         return self.mailboxes
 
     def _seed_market(self) -> None:
-        """Place a small city-backed sell board so buyers have something to hit."""
-        for city in self.grid.cities.values():
-            for item_id, qty, price in (("iron", 5, 8), ("coal", 5, 6), ("energy", 5, 10)):
-                if city.inventory.get(item_id) < qty:
+        """Seed a thin company-backed board. Cities never touch the market."""
+        # Give each AI company a small public sell so the board is not empty.
+        for company in self.companies.values():
+            if company.is_player:
+                continue
+            for item_id, qty, price in (("iron", 2, 9), ("coal", 2, 7)):
+                if company.inventory.get(item_id) < qty:
                     continue
-                city.inventory.add(item_id, -qty)
+                company.inventory.add(item_id, -qty)
                 self.market.inventory.add(item_id, qty)
                 lid = self.market.next_id()
                 self.market.add_listing(
@@ -148,10 +154,22 @@ class World:
                         item_id=item_id,
                         quantity=qty,
                         price=price,
-                        owner_kind="city",
-                        owner_id=city.id,
+                        owner_kind="company",
+                        owner_id=company.id,
                     )
                 )
+
+    def _require_company(self, kind: str, actor_id: str) -> Company:
+        if kind != "company":
+            raise ActionError("Only companies can use the market / company trade actions")
+        actor = self.get_actor("company", actor_id)
+        assert isinstance(actor, Company)
+        return actor
+
+    def _require_city(self, kind: str, actor_id: str):
+        if kind != "city":
+            raise ActionError("Only cities can post or award government contracts")
+        return self.get_actor("city", actor_id)
 
     def get_actor(self, kind: ActorKind | str, actor_id: str) -> Actor:
         if kind == "company":
@@ -449,11 +467,11 @@ class World:
         price: int,
     ) -> ActionResult:
         """Goods leave seller → market inventory + indexed sell listing. Cash later."""
+        actor = self._require_company(owner_kind, owner_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
-        actor = self.get_actor(owner_kind, owner_id)
         if actor.inventory.get(item_id) < quantity:
             raise ActionError("Not enough goods to sell")
         actor.inventory.add(item_id, -quantity)
@@ -482,6 +500,7 @@ class World:
 
     def retract_sell(self, owner_kind: str, owner_id: str, listing_id: int) -> ActionResult:
         """Return remaining goods from this sell listing only to its owner."""
+        self._require_company(owner_kind, owner_id)
         listing = self.market.listings.get(listing_id)
         if listing is None:
             raise ActionError(f"Unknown listing #{listing_id}")
@@ -514,11 +533,11 @@ class World:
         price: int,
     ) -> ActionResult:
         """Cash escrowed. Auto-fills when a sell appears at price <= this buy price."""
+        actor = self._require_company(owner_kind, owner_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
-        actor = self.get_actor(owner_kind, owner_id)
         total = price * quantity
         if actor.cash < total:
             raise ActionError("Not enough cash to post buy order")
@@ -546,6 +565,7 @@ class World:
 
     def retract_buy(self, owner_kind: str, owner_id: str, listing_id: int) -> ActionResult:
         """Refund remaining escrow for this buy listing only."""
+        self._require_company(owner_kind, owner_id)
         listing = self.market.listings.get(listing_id)
         if listing is None:
             raise ActionError(f"Unknown listing #{listing_id}")
@@ -574,11 +594,11 @@ class World:
         quantity: int,
     ) -> ActionResult:
         """Standard buy: take lowest-price sell listings now."""
+        buyer = self._require_company(owner_kind, owner_id)
         if quantity <= 0:
             raise ActionError("Invalid quantity")
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
-        buyer = self.get_actor(owner_kind, owner_id)
         remaining = quantity
         spent = 0
         got = 0
@@ -706,12 +726,14 @@ class World:
         price: int,
     ) -> ActionResult:
         """Direct sell proposal: reserve goods from proposer until accept/reject."""
+        proposer = self._require_company(from_kind, from_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
-        proposer = self.get_actor(from_kind, from_id)
         to_kind, to_id = self.resolve_counterpart(to)
+        if to_kind != "company":
+            raise ActionError("Cities do not use direct trade — use government contracts")
         if from_kind == to_kind and from_id == to_id:
             raise ActionError("Cannot propose to yourself")
         self.get_actor(to_kind, to_id)
@@ -759,12 +781,14 @@ class World:
         price: int,
     ) -> ActionResult:
         """Direct buy proposal: reserve cash from proposer until accept/reject."""
+        proposer = self._require_company(from_kind, from_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
-        proposer = self.get_actor(from_kind, from_id)
         to_kind, to_id = self.resolve_counterpart(to)
+        if to_kind != "company":
+            raise ActionError("Cities do not use direct trade — use government contracts")
         if from_kind == to_kind and from_id == to_id:
             raise ActionError("Cannot propose to yourself")
         self.get_actor(to_kind, to_id)
@@ -804,6 +828,7 @@ class World:
         )
 
     def accept_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
+        self._require_company(owner_kind, owner_id)
         prop = self.proposals.get(proposal_id)
         if prop is None:
             raise ActionError(f"Unknown proposal #{proposal_id}")
@@ -839,6 +864,7 @@ class World:
         return ActionResult(True, f"Accepted proposal #{proposal_id}", prop.to_public_dict())
 
     def reject_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
+        self._require_company(owner_kind, owner_id)
         prop = self.proposals.get(proposal_id)
         if prop is None:
             raise ActionError(f"Unknown proposal #{proposal_id}")
@@ -866,13 +892,200 @@ class World:
                 proposer.cash += reserved_cash
 
     def list_proposals(self, owner_kind: str, owner_id: str) -> ActionResult:
-        self.get_actor(owner_kind, owner_id)
+        self._require_company(owner_kind, owner_id)
         rows = self.proposals.pending_for(owner_kind, owner_id)
         return ActionResult(
             True,
             "proposals",
             {"proposals": [p.to_public_dict() for p in rows]},
         )
+
+    # --- Government contracts (CITY procurement) ------------------------
+
+    def post_government_contract(
+        self,
+        city_kind: str,
+        city_id: str,
+        requirements: dict[str, int],
+    ) -> ActionResult:
+        """City posts a public procurement need; all companies may bid."""
+        self._require_city(city_kind, city_id)
+        if not requirements:
+            raise ActionError("Requirements cannot be empty")
+        cleaned: dict[str, int] = {}
+        for item_id, qty in requirements.items():
+            q = int(qty)
+            if q <= 0:
+                raise ActionError(f"Invalid quantity for {item_id}")
+            if not self.items.has(item_id):
+                raise ActionError(f"Unknown item: {item_id}")
+            cleaned[str(item_id)] = q
+        cid = self.gov_contracts.next_id()
+        contract = GovernmentContract(
+            id=cid,
+            city_id=city_id,
+            requirements=cleaned,
+            status="open",
+            day_created=self.day,
+        )
+        self.gov_contracts.add(contract)
+        # Notify all companies via mail
+        for company in self.companies.values():
+            try:
+                req = ", ".join(f"{q}x {i}" for i, q in sorted(cleaned.items()))
+                self.send_message(
+                    "city",
+                    city_id,
+                    f"company:{company.id}",
+                    f"[GOV CONTRACT #{cid}] needs {req}. Bid with bid_government_contract.",
+                )
+            except ActionError:
+                pass
+        self.note_actor_action("city", city_id)
+        return ActionResult(True, f"Posted government contract #{cid}", contract.to_public_dict())
+
+    def bid_government_contract(
+        self,
+        company_kind: str,
+        company_id: str,
+        contract_id: int,
+        price: int,
+    ) -> ActionResult:
+        """Company offers a total price to fulfill the city's basket."""
+        self._require_company(company_kind, company_id)
+        if price < 0:
+            raise ActionError("Invalid bid price")
+        contract = self.gov_contracts.get(contract_id)
+        if contract is None:
+            raise ActionError(f"Unknown contract #{contract_id}")
+        if contract.status != "open":
+            raise ActionError(f"Contract #{contract_id} is {contract.status}, not open for bids")
+        bid = ContractBid(company_id=company_id, price=int(price), day=self.day)
+        contract.bids[company_id] = bid  # latest bid from this company replaces prior
+        self.note_actor_action("company", company_id)
+        return ActionResult(
+            True,
+            f"Bid {price} on government contract #{contract_id}",
+            {"contract_id": contract_id, "bid": bid.to_public_dict()},
+        )
+
+    def award_government_contract(
+        self,
+        city_kind: str,
+        city_id: str,
+        contract_id: int,
+    ) -> ActionResult:
+        """City closes bidding; lowest price wins; city cash for that price is escrowed."""
+        city = self._require_city(city_kind, city_id)
+        contract = self.gov_contracts.get(contract_id)
+        if contract is None:
+            raise ActionError(f"Unknown contract #{contract_id}")
+        if contract.city_id != city_id:
+            raise ActionError("Not your government contract")
+        if contract.status != "open":
+            raise ActionError(f"Contract #{contract_id} is {contract.status}")
+        if not contract.bids:
+            raise ActionError("No bids to award")
+        winner = min(contract.bids.values(), key=lambda b: (b.price, b.day, b.company_id))
+        if city.cash < winner.price:
+            raise ActionError("City cannot afford the winning bid")
+        city.cash -= winner.price
+        self.gov_contracts.escrow_cash[contract.id] = winner.price
+        contract.status = "awarded"
+        contract.winner_company_id = winner.company_id
+        contract.winning_price = winner.price
+        contract.day_awarded = self.day
+        try:
+            self.send_message(
+                "city",
+                city_id,
+                f"company:{winner.company_id}",
+                f"[GOV CONTRACT #{contract_id} AWARDED] You won at {winner.price}. "
+                f"Deliver {contract.requirements} via fulfill_government_contract.",
+            )
+        except ActionError:
+            pass
+        self.note_actor_action("city", city_id)
+        return ActionResult(
+            True,
+            f"Awarded contract #{contract_id} to company:{winner.company_id} @ {winner.price}",
+            contract.to_public_dict(),
+        )
+
+    def fulfill_government_contract(
+        self,
+        company_kind: str,
+        company_id: str,
+        contract_id: int,
+    ) -> ActionResult:
+        """Winner transfers all required goods to the city; escrowed cash pays the company."""
+        company = self._require_company(company_kind, company_id)
+        contract = self.gov_contracts.get(contract_id)
+        if contract is None:
+            raise ActionError(f"Unknown contract #{contract_id}")
+        if contract.status != "awarded":
+            raise ActionError(f"Contract #{contract_id} is {contract.status}")
+        if contract.winner_company_id != company_id:
+            raise ActionError("You are not the awarded company for this contract")
+        # Must hold every required resource
+        missing = {
+            item: need - company.inventory.get(item)
+            for item, need in contract.requirements.items()
+            if company.inventory.get(item) < need
+        }
+        if missing:
+            raise ActionError(f"Missing resources to fulfill: {missing}")
+        city = self.get_actor("city", contract.city_id)
+        price = contract.winning_price
+        if price is None:
+            raise ActionError("Contract has no winning price")
+        escrowed = self.gov_contracts.escrow_cash.get(contract.id)
+        if escrowed != price:
+            raise ActionError("Contract escrow mismatch")
+        # Transfer goods cityward
+        for item_id, qty in contract.requirements.items():
+            company.inventory.add(item_id, -qty)
+            city.inventory.add(item_id, qty)
+        # Pay company from escrow
+        del self.gov_contracts.escrow_cash[contract.id]
+        company.cash += price
+        contract.status = "fulfilled"
+        contract.day_fulfilled = self.day
+        self.note_actor_action("company", company_id)
+        return ActionResult(
+            True,
+            f"Fulfilled government contract #{contract_id}; received {price}",
+            contract.to_public_dict(),
+        )
+
+    def cancel_government_contract(
+        self,
+        city_kind: str,
+        city_id: str,
+        contract_id: int,
+    ) -> ActionResult:
+        """City cancels an open or awarded (unfulfilled) contract; refund escrow if any."""
+        city = self._require_city(city_kind, city_id)
+        contract = self.gov_contracts.get(contract_id)
+        if contract is None:
+            raise ActionError(f"Unknown contract #{contract_id}")
+        if contract.city_id != city_id:
+            raise ActionError("Not your government contract")
+        if contract.status not in ("open", "awarded"):
+            raise ActionError(f"Cannot cancel contract in status {contract.status}")
+        if contract.id in self.gov_contracts.escrow_cash:
+            city.cash += self.gov_contracts.escrow_cash.pop(contract.id)
+        contract.status = "cancelled"
+        self.note_actor_action("city", city_id)
+        return ActionResult(True, f"Cancelled government contract #{contract_id}", contract.to_public_dict())
+
+    def list_government_contracts(
+        self,
+        kind: str,
+        actor_id: str,
+    ) -> ActionResult:
+        self.get_actor(kind, actor_id)
+        return ActionResult(True, "government_contracts", self.gov_contracts.to_public_dict())
 
     def set_paused(self, paused: bool) -> ActionResult:
         self.paused = paused
@@ -962,6 +1175,7 @@ class World:
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),
             "proposals": self.proposals.to_public_dict(),
+            "government_contracts": self.gov_contracts.to_public_dict(),
             "mailboxes": self.mail().to_public_dict() if self.mailboxes else {"mailbox_count": 0},
             "content": self.content.to_public_dict(),
             "map": self.grid.to_public_dict(),
