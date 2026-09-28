@@ -109,12 +109,61 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "produce",
-            "description": "Run one production batch on your building at (x,y).",
+            "name": "destroy_building",
+            "description": "Destroy your building; returns storage + 10% of build materials (floored).",
             "parameters": {
                 "type": "object",
                 "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
                 "required": ["x", "y"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "produce",
+            "description": "Run one production batch using goods in the building's storage (not personal inventory).",
+            "parameters": {
+                "type": "object",
+                "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
+                "required": ["x", "y"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "deposit_to_building",
+            "description": "Move goods from your inventory into building storage (cap 10 per allowed item).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                },
+                "required": ["x", "y", "item_id", "quantity"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "withdraw_from_building",
+            "description": "Move goods from building storage into your inventory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "item_id": {"type": "string"},
+                    "quantity": {"type": "integer"},
+                },
+                "required": ["x", "y", "item_id", "quantity"],
                 "additionalProperties": False,
             },
         },
@@ -132,6 +181,27 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "method_id": {"type": "string"},
                 },
                 "required": ["x", "y", "method_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_catalog",
+            "description": "Look up shared economy catalogs: goods_index, buildings, or production_methods (all agents can see everything).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "section": {
+                        "type": "string",
+                        "description": "goods | buildings | methods | good",
+                    },
+                    "id": {
+                        "type": "string",
+                        "description": "Optional item/building/method id when section=good or for filtering",
+                    },
+                },
                 "additionalProperties": False,
             },
         },
@@ -698,8 +768,34 @@ class ToolExecutor:
             r = self.world.build_building(kind, aid, int(args["x"]), int(args["y"]), building_id)
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
+        if name == "destroy_building":
+            r = self.world.destroy_building(kind, aid, int(args["x"]), int(args["y"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
         if name == "produce":
             r = self.world.produce(kind, aid, int(args["x"]), int(args["y"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "deposit_to_building":
+            r = self.world.deposit_to_building(
+                kind,
+                aid,
+                int(args["x"]),
+                int(args["y"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "withdraw_from_building":
+            r = self.world.withdraw_from_building(
+                kind,
+                aid,
+                int(args["x"]),
+                int(args["y"]),
+                str(args["item_id"]),
+                int(args["quantity"]),
+            )
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "set_production_method":
@@ -707,6 +803,60 @@ class ToolExecutor:
                 kind, aid, int(args["x"]), int(args["y"]), str(args["method_id"])
             )
             return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "get_catalog":
+            section = str(args.get("section") or "goods").lower()
+            cid = args.get("id")
+            content = self.world.content
+            if section in ("good", "goods", "item", "items"):
+                if cid:
+                    try:
+                        card = content.good_card(str(cid))
+                    except KeyError:
+                        return {"ok": False, "message": f"Unknown item: {cid}"}
+                    return {"ok": True, "message": "good", "data": card}
+                return {
+                    "ok": True,
+                    "message": "goods_index",
+                    "data": {"goods_index": content.goods_index},
+                }
+            if section in ("building", "buildings"):
+                if cid:
+                    if not content.buildings.has(str(cid)):
+                        return {"ok": False, "message": f"Unknown building: {cid}"}
+                    b = content.buildings.get(str(cid))
+                    return {
+                        "ok": True,
+                        "message": "building",
+                        "data": {
+                            **b.to_public_dict(),
+                            "methods": list(content.methods_by_building.get(b.id, [])),
+                            "storage_capacity": content.storage_capacity_for_building(b.id),
+                        },
+                    }
+                return {
+                    "ok": True,
+                    "message": "buildings",
+                    "data": {
+                        "buildings": content.to_public_dict()["buildings"],
+                    },
+                }
+            if section in ("method", "methods", "production", "production_methods"):
+                if cid:
+                    try:
+                        m = content.production.get(str(cid))
+                    except KeyError:
+                        return {"ok": False, "message": f"Unknown method: {cid}"}
+                    return {"ok": True, "message": "method", "data": m.to_public_dict()}
+                return {
+                    "ok": True,
+                    "message": "methods",
+                    "data": {"production_methods": content.production.to_public_dict()},
+                }
+            return {
+                "ok": False,
+                "message": "section must be goods|buildings|methods|good",
+            }
 
         if name == "post_sell":
             r = self.world.post_sell(

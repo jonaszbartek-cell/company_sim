@@ -9,6 +9,8 @@ import uuid
 
 import yaml
 
+from company_sim.items import Inventory
+
 BuildingStatus = Literal["idle", "working"]
 
 
@@ -48,8 +50,10 @@ class Building:
     """
     Runtime instance of a building on a plot.
 
-    possible production methods come from GameContent via building_id;
-    production_method_id is the currently chosen method.
+    Storage holds goods for recipes that run here. Allowed slots = union of
+    all method inputs/outputs for this building_id (capacity 10 each), derived
+    from GameContent so YAML changes update automatically. Contents belong to
+    the plot owner.
     """
 
     building_id: str
@@ -59,6 +63,7 @@ class Building:
     production_method_id: str | None = None
     status: BuildingStatus = "idle"
     progress: float = 0.0  # 0..1 toward next batch (legacy / multi-day)
+    storage: Inventory = field(default_factory=Inventory)
 
     def to_public_dict(self) -> dict:
         return {
@@ -70,6 +75,7 @@ class Building:
             "production_method_id": self.production_method_id,
             "status": self.status,
             "progress": self.progress,
+            "storage": self.storage.as_dict(),
         }
 
 

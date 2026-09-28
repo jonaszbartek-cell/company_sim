@@ -140,6 +140,20 @@ class GameContent:
     def methods_for_building(self, building_id: str) -> list:
         return [self.production.get(mid) for mid in self.methods_by_building.get(building_id, [])]
 
+    def storage_items_for_building(self, building_id: str) -> list[str]:
+        """Item ids that can be stored in this building (union of method I/O).
+
+        Capacity is always 10 per item; list rebuilds when YAML methods change.
+        """
+        items: set[str] = set()
+        for method in self.methods_for_building(building_id):
+            items.update(method.inputs.keys())
+            items.update(method.outputs.keys())
+        return sorted(items)
+
+    def storage_capacity_for_building(self, building_id: str) -> dict[str, int]:
+        return {item_id: 10 for item_id in self.storage_items_for_building(building_id)}
+
     def good_card(self, item_id: str) -> dict:
         if item_id not in self.goods_index:
             raise KeyError(f"Unknown item: {item_id}")
@@ -172,10 +186,53 @@ class GameContent:
             lines.append("")
         return "\n".join(lines)
 
+    def render_buildings_catalog_text(self) -> str:
+        lines = [
+            "=== BUILDINGS CATALOG ===",
+            "file: (derived from buildings.yaml + production_methods.yaml)",
+            f"building_count: {len(self.buildings.all())}",
+            "",
+        ]
+        for b in self.buildings.all():
+            methods = self.methods_by_building.get(b.id, [])
+            slots = self.storage_items_for_building(b.id)
+            lines.append(f"-- {b.name} [{b.id}] --")
+            lines.append(f"  build_cost_cash: {b.build_cost}")
+            lines.append(f"  build_cost_items: {b.build_cost_items or '{}'}")
+            lines.append(f"  allowed_plot_types: {list(b.allowed_plot_types)}")
+            lines.append(f"  methods: {', '.join(methods) or '(none)'}")
+            lines.append(f"  storage_slots (cap 10 each): {', '.join(slots) or '(none)'}")
+            if b.description:
+                lines.append(f"  {b.description}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def render_methods_catalog_text(self) -> str:
+        lines = [
+            "=== PRODUCTION METHODS CATALOG ===",
+            "file: (derived from production_methods.yaml)",
+            f"method_count: {len(self.production.all())}",
+            "",
+        ]
+        for m in self.production.all():
+            lines.append(f"-- {m.name} [{m.id}] @ {m.building_id} --")
+            lines.append(f"  duration_sec: {m.duration_sec}")
+            lines.append(f"  inputs: {m.inputs or '{}'}")
+            lines.append(f"  outputs: {m.outputs or '{}'}")
+            lines.append("")
+        return "\n".join(lines)
+
     def to_public_dict(self) -> dict:
         return {
             "items": self.items.to_public_dict(),
-            "buildings": self.buildings.to_public_dict(),
+            "buildings": [
+                {
+                    **b.to_public_dict(),
+                    "methods": list(self.methods_by_building.get(b.id, [])),
+                    "storage_capacity": self.storage_capacity_for_building(b.id),
+                }
+                for b in self.buildings.all()
+            ],
             "production_methods": self.production.to_public_dict(),
             "indexes": {
                 "methods_by_building": dict(self.methods_by_building),

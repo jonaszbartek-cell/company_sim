@@ -101,14 +101,28 @@ class GamePersistence:
         path.write_text(world.content.render_goods_index_text(compact=True), encoding="utf-8")
         return path
 
+    def save_buildings_catalog(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.root / "buildings_catalog.txt"
+        path.write_text(world.content.render_buildings_catalog_text(), encoding="utf-8")
+        return path
+
+    def save_methods_catalog(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.root / "production_methods_catalog.txt"
+        path.write_text(world.content.render_methods_catalog_text(), encoding="utf-8")
+        return path
+
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + agents + mailboxes + proposals + gov + goods index."""
+        """Write world + market + agents + mailboxes + proposals + gov + catalogs."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
             "proposals": self.save_proposals(world),
             "government_contracts": self.save_government_contracts(world),
             "goods_index": self.save_goods_index(world),
+            "buildings_catalog": self.save_buildings_catalog(world),
+            "production_methods_catalog": self.save_methods_catalog(world),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)
@@ -255,9 +269,12 @@ class GamePersistence:
             b = t.plot.building
             if b:
                 methods = [m.id for m in world.content.methods_for_building(b.building_id)]
+                cap = world.content.storage_capacity_for_building(b.building_id)
                 binfo = (
                     f"building id={b.id} type={b.building_id} status={b.status} "
-                    f"method={b.production_method_id} possible={methods}"
+                    f"method={b.production_method_id} possible={methods} "
+                    f"storage={b.storage.as_dict() or '{}'} "
+                    f"storage_cap={cap}"
                 )
             else:
                 binfo = "building=none"

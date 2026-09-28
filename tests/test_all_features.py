@@ -142,12 +142,19 @@ def test_land_build_produce_road_combine():
         r = w.set_production_method("company", "player", 1, 1, "make_steel")
         assert r.ok
         player.acted_this_day = False
-        steel_before = player.inventory.get("steel")
+        for item_id in ("iron_ore", "coal", "energy"):
+            w.deposit_to_building("company", "player", 1, 1, item_id, 1)
+            player.acted_this_day = False
+        steel_inv_before = player.inventory.get("steel")
         r = w.produce("company", "player", 1, 1)
         assert r.ok
-        assert player.inventory.get("steel") == steel_before + 1
-        # Building may be idle if day advanced (only one company → produce advances day)
-        assert w.grid.get(1, 1).plot.building is not None
+        bld = w.grid.get(1, 1).plot.building
+        assert bld is not None
+        assert bld.storage.get("steel") >= 1
+        assert player.inventory.get("steel") == steel_inv_before  # output stays in building
+        player.acted_this_day = False
+        w.withdraw_from_building("company", "player", 1, 1, "steel", 1)
+        assert player.inventory.get("steel") == steel_inv_before + 1
 
         player.acted_this_day = False
         steel_before = player.inventory.get("steel")
@@ -320,8 +327,12 @@ def test_all_llm_tools_are_registered_and_dispatch():
         "propose_plot_buy",
         "propose_plot_sell",
         "build_building",
+        "destroy_building",
+        "deposit_to_building",
+        "withdraw_from_building",
         "produce",
         "set_production_method",
+        "get_catalog",
         "post_sell",
         "post_buy",
         "buy_from_market",
@@ -362,6 +373,7 @@ def test_all_llm_tools_are_registered_and_dispatch():
 
         assert ex.execute("get_status", {})["ok"]
         assert ex.execute("get_market", {})["ok"]
+        assert ex.execute("get_catalog", {"section": "goods"})["ok"]
         assert ex.execute("list_plots_for_sale", {"limit": 3})["ok"]
         assert ex.execute("list_proposals", {})["ok"]
         assert ex.execute("list_government_contracts", {})["ok"]
@@ -371,7 +383,20 @@ def test_all_llm_tools_are_registered_and_dispatch():
         company.acted_this_day = False
         assert ex.execute("set_production_method", {"x": 0, "y": 0, "method_id": "make_steel"})["ok"]
         company.acted_this_day = False
+        for item_id in ("iron_ore", "coal", "energy"):
+            assert ex.execute(
+                "deposit_to_building",
+                {"x": 0, "y": 0, "item_id": item_id, "quantity": 1},
+            )["ok"]
+            company.acted_this_day = False
         assert ex.execute("produce", {"x": 0, "y": 0})["ok"]
+        company.acted_this_day = False
+        steel_qty = w.grid.get(0, 0).plot.building.storage.get("steel")
+        assert steel_qty >= 1
+        assert ex.execute(
+            "withdraw_from_building",
+            {"x": 0, "y": 0, "item_id": "steel", "quantity": steel_qty},
+        )["ok"]
         company.acted_this_day = False
         # Road on S so E edge stays free for combine with (1,0)
         assert ex.execute("build_road", {"x": 0, "y": 0, "side": "S"})["ok"]
@@ -515,7 +540,23 @@ def test_player_http_api_setup_and_core_routes():
         "/api/player/build", json={"x": 1, "y": 1, "building_id": "foundry"}
     ).json()["ok"]
     world.companies["player"].acted_this_day = False
+    assert client.post(
+        "/api/player/set_production_method",
+        json={"x": 1, "y": 1, "method_id": "make_steel"},
+    ).json()["ok"]
+    world.companies["player"].acted_this_day = False
+    for item_id in ("iron_ore", "coal", "energy"):
+        assert client.post(
+            "/api/player/deposit_to_building",
+            json={"x": 1, "y": 1, "item_id": item_id, "quantity": 1},
+        ).json()["ok"]
+        world.companies["player"].acted_this_day = False
     assert client.post("/api/player/produce", json={"x": 1, "y": 1}).json()["ok"]
+    world.companies["player"].acted_this_day = False
+    assert client.post(
+        "/api/player/withdraw_from_building",
+        json={"x": 1, "y": 1, "item_id": "steel", "quantity": 1},
+    ).json()["ok"]
     world.companies["player"].acted_this_day = False
     assert client.post(
         "/api/player/build_road", json={"x": 1, "y": 1, "side": "S"}

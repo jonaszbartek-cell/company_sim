@@ -108,6 +108,18 @@ class ProductionMethodBody(BaseModel):
     method_id: str
 
 
+class BuildingGoodsBody(BaseModel):
+    x: int
+    y: int
+    item_id: str
+    quantity: int
+
+
+class CoordBody(BaseModel):
+    x: int
+    y: int
+
+
 class PlayerActionBody(BaseModel):
     """Run any company agent tool by name (same ToolExecutor path as the LLM)."""
 
@@ -327,6 +339,47 @@ def create_app() -> FastAPI:
                 "company", _player(), body.x, body.y, body.method_id
             )
             return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.post("/api/player/deposit_to_building")
+    def deposit_to_building(body: BuildingGoodsBody) -> dict[str, Any]:
+        try:
+            result = _require_world().deposit_to_building(
+                "company", _player(), body.x, body.y, body.item_id, body.quantity
+            )
+            return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.post("/api/player/withdraw_from_building")
+    def withdraw_from_building(body: BuildingGoodsBody) -> dict[str, Any]:
+        try:
+            result = _require_world().withdraw_from_building(
+                "company", _player(), body.x, body.y, body.item_id, body.quantity
+            )
+            return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.post("/api/player/destroy_building")
+    def destroy_building(body: CoordBody) -> dict[str, Any]:
+        try:
+            result = _require_world().destroy_building("company", _player(), body.x, body.y)
+            return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.get("/api/catalog")
+    def get_catalog(section: str = "goods", id: str | None = None) -> dict[str, Any]:
+        """Shared goods/buildings/methods catalogs (same data every agent can see)."""
+        try:
+            w = _require_world()
+            ex = ToolExecutor(w, w.get_actor("company", _player()))
+            args: dict[str, Any] = {"section": section}
+            if id:
+                args["id"] = id
+            return ex.execute("get_catalog", args)
         except ActionError as exc:
             return _err(exc)
 
