@@ -319,9 +319,10 @@ def test_placeholder_arts_exist_for_catalog():
     for b in c.buildings.all():
         assert (root / "buildings" / "ui" / f"{b.id}.svg").is_file(), b.id
         for w, h in ((1, 1), (3, 1), (2, 2), (9, 9)):
-            assert (root / "buildings" / "map" / f"{b.id}_{w}x{h}.svg").is_file(), f"{b.id}_{w}x{h}"
+            assert (root / "buildings" / "map" / b.id / f"{w}x{h}.svg").is_file(), f"{b.id}/{w}x{h}"
         art = b.to_public_dict()["art"]
         assert art["ui"].endswith(f"/ui/{b.id}.svg")
+        assert art["map"].endswith(f"/map/{b.id}/1x1.svg")
     assert (root / "terrain" / "grass.svg").is_file()
     assert (root / "terrain" / "grass_specialized.svg").is_file()
     for mask in range(16):
@@ -347,7 +348,7 @@ def test_combine_empty_and_same_building_expands_footprint():
         b = w.grid.get(1, 1).plot.building
         assert b.footprint_w == 2 and b.footprint_h == 1
         assert w.grid.get(2, 1).plot.building is b
-        assert b.map_art_path().endswith("foundry_2x1.svg")
+        assert b.map_art_path().endswith("foundry/2x1.svg")
 
 
 def test_combine_rejects_different_buildings():

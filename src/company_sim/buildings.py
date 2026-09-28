@@ -43,7 +43,7 @@ class BuildingDefinition:
             "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
             "art": {
-                "map": f"/static/assets/buildings/map/{self.id}_1x1.svg",
+                "map": f"/static/assets/buildings/map/{self.id}/1x1.svg",
                 "ui": f"/static/assets/buildings/ui/{self.id}.svg",
             },
         }
@@ -86,7 +86,7 @@ class Building:
     def map_art_path(self) -> str:
         w = max(1, min(9, int(self.footprint_w)))
         h = max(1, min(9, int(self.footprint_h)))
-        return f"/static/assets/buildings/map/{self.building_id}_{w}x{h}.svg"
+        return f"/static/assets/buildings/map/{self.building_id}/{w}x{h}.svg"
 
     def materialize_storage(self, capacity: dict[str, int]) -> None:
         """Create hard storage slots from a capacity map (call on build)."""

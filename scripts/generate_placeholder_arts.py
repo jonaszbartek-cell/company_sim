@@ -2,11 +2,11 @@
 """Generate modern minimal placeholder arts for company_sim.
 
 Outputs under web/assets/:
-  goods/{id}.svg                     — flat 2D UI icons
-  buildings/ui/{id}.svg              — flat 2D UI icons
-  buildings/map/{id}_{w}x{h}.svg     — fake-3D map sprites (1..9 × 1..9)
-  terrain/grass.svg                  — plot ground
-  roads/mask_{0..15}.svg             — N=1 E=2 S=4 W=8 road junctions
+  goods/{id}.svg                        — flat 2D UI icons
+  buildings/ui/{id}.svg                 — flat 2D UI icons
+  buildings/map/{id}/{w}x{h}.svg        — fake-3D map sprites (1..9 × 1..9)
+  terrain/grass.svg                     — plot ground
+  roads/mask_{0..15}.svg                — N=1 E=2 S=4 W=8 road junctions
 """
 
 from __future__ import annotations
@@ -250,36 +250,42 @@ def main() -> None:
     for d in (goods, ui, maps, terrain, roads):
         d.mkdir(parents=True, exist_ok=True)
 
-    # Remove legacy single-cell map files if present (replaced by _{w}x{h})
+    # Clear legacy flat map sprites (old {id}.svg / {id}_{w}x{h}.svg layout)
     for old in maps.glob("*.svg"):
-        if "_x" not in old.stem and "x" not in old.stem.split("_")[-1]:
-            # keep only if matches id_WxH
-            pass
-    for old in maps.glob("*.svg"):
-        stem = old.stem
-        if "_" not in stem or "x" not in stem.split("_")[-1]:
-            old.unlink(missing_ok=True)
+        old.unlink(missing_ok=True)
 
     for item in c.items.all():
         bg, accent = CAT_COLORS.get(item.category, CAT_COLORS["general"])
         write(goods / f"{item.id}.svg", flat_icon(item.id, bg, accent, item.category[:3].upper(), 56))
 
+    map_count = 0
     for b in c.buildings.all():
         face, side = BLD_COLORS.get(b.id, ("#6c757d", "#adb5bd"))
         write(ui / f"{b.id}.svg", flat_icon(b.name if len(b.name) <= 14 else b.id, face, side, "BLD", 72))
+        bdir = maps / b.id
+        bdir.mkdir(parents=True, exist_ok=True)
         for w in range(1, 10):
             for h in range(1, 10):
-                write(maps / f"{b.id}_{w}x{h}.svg", fake3d_building(b.id, w, h, face, side))
+                write(bdir / f"{w}x{h}.svg", fake3d_building(b.id, w, h, face, side))
+                map_count += 1
 
     write(terrain / "grass.svg", grass_tile())
-    write(terrain / "grass_specialized.svg", grass_tile().replace("#3f7d4e", "#5a7d3f").replace("#2f5e3b", "#3f5e2a").replace("#6fbf7a", "#c4bf6f").replace("#58a864", "#a8a058").replace("#9ad4a3", "#d4d49a"))
+    write(
+        terrain / "grass_specialized.svg",
+        grass_tile()
+        .replace("#3f7d4e", "#5a7d3f")
+        .replace("#2f5e3b", "#3f5e2a")
+        .replace("#6fbf7a", "#c4bf6f")
+        .replace("#58a864", "#a8a058")
+        .replace("#9ad4a3", "#d4d49a"),
+    )
 
     for mask in range(16):
         write(roads / f"mask_{mask}.svg", road_mask_svg(mask))
 
     print(f"goods={len(list(goods.glob('*.svg')))}")
     print(f"ui={len(list(ui.glob('*.svg')))}")
-    print(f"map={len(list(maps.glob('*.svg')))}")
+    print(f"map={map_count} across {len(list(maps.iterdir()))} building folders")
     print(f"roads={len(list(roads.glob('*.svg')))}")
     print("terrain ok")
 

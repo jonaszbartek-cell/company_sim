@@ -17,7 +17,7 @@ const artCache = new Map();
 function artUrl(path, fallbackKind, id) {
   if (path) return path;
   if (fallbackKind === "good") return `/static/assets/goods/${id}.svg`;
-  if (fallbackKind === "building-map") return `/static/assets/buildings/map/${id}.svg`;
+  if (fallbackKind === "building-map") return `/static/assets/buildings/map/${id}/1x1.svg`;
   if (fallbackKind === "building-ui") return `/static/assets/buildings/ui/${id}.svg`;
   return "";
 }
@@ -47,7 +47,7 @@ function buildingArt(buildingId, kind = "map", fw = 1, fh = 1) {
   }
   const w = Math.max(1, Math.min(9, fw || 1));
   const h = Math.max(1, Math.min(9, fh || 1));
-  return `/static/assets/buildings/map/${buildingId}_${w}x${h}.svg`;
+  return `/static/assets/buildings/map/${buildingId}/${w}x${h}.svg`;
 }
 
 function terrainArt(plotType) {

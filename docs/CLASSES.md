@@ -40,7 +40,7 @@ Market
 - Runtime **goods_index** + reverse indexes on `GameContent` (also `saves/goods_index.txt` for LLMs)
 - Building storage: **cap 10** of every good used/made by that building's methods (auto-updates with YAML)
 - Build cost placeholder: **100 cash + 10 construction_materials**; destroy returns floor(10%) of materials + storage contents
-- Placeholder arts under `web/assets/` (`goods/`, `buildings/map/` as `{id}_{w}x{h}`, `buildings/ui/`, `terrain/`, `roads/mask_*`)
+- Placeholder arts under `web/assets/` (`goods/`, `buildings/map/<id>/{w}x{h}.svg`, `buildings/ui/`, `terrain/`, `roads/mask_*`)
 - Combine: empty groups freely; with buildings only same type / expand onto empty; footprint stays a filled rectangle ≤9×9
 
 ## Later
