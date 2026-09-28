@@ -82,7 +82,7 @@ def test_player_action_rejects_unknown_and_city_tools(client):
     assert (
         c.post(
             "/api/player/action",
-            json={"name": "post_government_contract", "arguments": {"requirements": {"iron": 1}}},
+            json={"name": "post_government_contract", "arguments": {"requirements": {"iron_ore": 1}}},
         ).json()["ok"]
         is False
     )
@@ -99,7 +99,7 @@ def test_player_action_fuzz_all_tools_with_empty_and_weird_args(client):
             "x": 0,
             "y": 0,
             "price": 1,
-            "item_id": "iron",
+            "item_id": "iron_ore",
             "quantity": 1,
             "side": "N",
             "building_id": "foundry",
@@ -110,9 +110,9 @@ def test_player_action_fuzz_all_tools_with_empty_and_weird_args(client):
             "body": "hi",
             "limit": 3,
             "with_whom": "city:city_a",
-            "requirements": {"iron": 1},
+            "requirements": {"iron_ore": 1},
         },
-        {"quantity": 10**9, "price": 10**9, "item_id": "iron"},
+        {"quantity": 10**9, "price": 10**9, "item_id": "iron_ore"},
     ]
     for tool in player_tool_catalog():
         for args in weird_batches:
@@ -129,12 +129,12 @@ def test_market_http_edge_flows(client):
     # Invalid sell
     assert c.post(
         "/api/player/market/sell",
-        json={"item_id": "iron", "quantity": 0, "price": 5},
+        json={"item_id": "iron_ore", "quantity": 0, "price": 5},
     ).json()["ok"] is False
     # Valid sell then retract
     sell = c.post(
         "/api/player/market/sell",
-        json={"item_id": "iron", "quantity": 1, "price": 12},
+        json={"item_id": "iron_ore", "quantity": 1, "price": 12},
     ).json()
     assert sell["ok"] is True
     lid = sell["data"]["listing_id"]
@@ -193,11 +193,11 @@ def test_plots_for_sale_and_status_via_action(client):
     assert status["data"]["id"] == "player"
     market = c.post(
         "/api/player/action",
-        json={"name": "get_market", "arguments": {"item_id": "iron"}},
+        json={"name": "get_market", "arguments": {"item_id": "iron_ore"}},
     ).json()
     assert market["ok"] is True
     for L in market["data"]["sell_listings"]:
-        assert L["item_id"] == "iron"
+        assert L["item_id"] == "iron_ore"
 
 
 def test_llm_debug_trace_path_traversal_http(client):
@@ -308,7 +308,7 @@ def test_direct_goods_propose_http(client):
     # Need inventory
     sell = c.post(
         "/api/player/propose_sell",
-        json={"to": "company:ai_1", "item_id": "iron", "quantity": 1, "price": 7},
+        json={"to": "company:ai_1", "item_id": "iron_ore", "quantity": 1, "price": 7},
     ).json()
     assert sell["ok"] is True
     buy = c.post(

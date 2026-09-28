@@ -24,7 +24,8 @@ class BuildingDefinition:
     id: str
     name: str
     description: str = ""
-    build_cost: int = 100
+    build_cost: int = 100  # cash
+    build_cost_items: dict[str, int] = field(default_factory=dict)
     allowed_plot_types: tuple[str, ...] = ("standard", "specialized")
 
     def allows_plot_type(self, plot_type: object) -> bool:
@@ -37,6 +38,7 @@ class BuildingDefinition:
             "name": self.name,
             "description": self.description,
             "build_cost": self.build_cost,
+            "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
         }
 
@@ -81,13 +83,17 @@ class BuildingCatalog:
         buildings: dict[str, BuildingDefinition] = {}
         for row in data.get("buildings", []):
             allowed = tuple(row.get("allowed_plot_types") or ["standard", "specialized"])
+            cost_items = {str(k): int(v) for k, v in (row.get("build_cost_items") or {}).items()}
             bdef = BuildingDefinition(
                 id=row["id"],
                 name=row.get("name", row["id"]),
                 description=row.get("description", ""),
                 build_cost=int(row.get("build_cost", 100)),
+                build_cost_items=cost_items,
                 allowed_plot_types=allowed,
             )
+            if bdef.id in buildings:
+                raise ValueError(f"Duplicate building id in {path}: {bdef.id}")
             buildings[bdef.id] = bdef
         return cls(buildings)
 
@@ -119,8 +125,9 @@ def load_default_buildings() -> BuildingCatalog:
             "foundry": BuildingDefinition(
                 id="foundry",
                 name="Foundry",
-                description="Industrial building that smelts steel",
-                build_cost=200,
+                description="Industrial building that smelts metals",
+                build_cost=100,
+                build_cost_items={"construction_materials": 10},
             )
         }
     )

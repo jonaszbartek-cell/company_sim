@@ -32,7 +32,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "properties": {
                     "item_id": {
                         "type": "string",
-                        "description": "Optional filter by item id (iron, coal, energy, steel)",
+                        "description": "Optional filter by item id (iron_ore, coal, energy, steel, …)",
                     }
                 },
                 "additionalProperties": False,
@@ -292,7 +292,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                 "properties": {
                     "requirements": {
                         "type": "object",
-                        "description": "Map of item_id → quantity, e.g. {\"iron\": 5, \"coal\": 3}",
+                        "description": "Map of item_id → quantity, e.g. {\"iron_ore\": 5, \"coal\": 3}",
                         "additionalProperties": {"type": "integer"},
                     }
                 },

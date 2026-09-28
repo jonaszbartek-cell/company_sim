@@ -61,7 +61,15 @@ class Company(Actor):
         if isinstance(self.inventory, dict):
             self.inventory = Inventory(self.inventory)
         if not self.inventory.quantities:
-            self.inventory = Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0})
+            self.inventory = Inventory(
+                {
+                    "iron_ore": 20,
+                    "coal": 20,
+                    "energy": 20,
+                    "steel": 0,
+                    "construction_materials": 50,
+                }
+            )
 
     @property
     def kind(self) -> ActorKind:
@@ -89,7 +97,15 @@ class City(Actor):
         if isinstance(self.inventory, dict):
             self.inventory = Inventory(self.inventory)
         if not self.inventory.quantities:
-            self.inventory = Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0})
+            self.inventory = Inventory(
+                {
+                    "iron_ore": 20,
+                    "coal": 20,
+                    "energy": 20,
+                    "steel": 0,
+                    "construction_materials": 50,
+                }
+            )
 
     @property
     def kind(self) -> ActorKind:

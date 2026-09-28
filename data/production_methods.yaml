@@ -1,17 +1,593 @@
 # Editable game content — Production methods (recipes)
-# Add a method by appending under `production_methods:`.
+# Add a method under `production_methods:`.
 # `inputs` / `outputs` keys must match item ids from items.yaml.
 # `building_id` must match a building in buildings.yaml.
+#
+# Placeholders for now:
+#   - all input/output quantities are 1
+#   - duration_sec = 1  →  one basic time unit (= one day; day advances when all companies acted)
 
 production_methods:
+  # --- Mine (no inputs) ---
+  - id: extract_iron_ore
+    name: Iron Ore
+    description: Mine iron ore
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      iron_ore: 1
+
+  - id: extract_copper_ore
+    name: Copper Ore
+    description: Mine copper ore
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      copper_ore: 1
+
+  - id: extract_bauxite
+    name: Bauxite
+    description: Mine bauxite
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      bauxite: 1
+
+  - id: extract_coal
+    name: Coal
+    description: Mine coal
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      coal: 1
+
+  - id: extract_limestone
+    name: Limestone
+    description: Mine limestone
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      limestone: 1
+
+  - id: extract_silica
+    name: Silica
+    description: Mine silica
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      silica: 1
+
+  - id: extract_rare_minerals
+    name: Rare Minerals
+    description: Mine rare minerals
+    building_id: mine
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      rare_minerals: 1
+
+  # --- Rig (no inputs) ---
+  - id: extract_oil
+    name: Oil
+    description: Extract oil
+    building_id: rig
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      oil: 1
+
+  - id: extract_natural_gas
+    name: Natural Gas
+    description: Extract natural gas
+    building_id: rig
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      natural_gas: 1
+
+  - id: extract_water
+    name: Water
+    description: Extract water
+    building_id: rig
+    duration_sec: 1
+    inputs: {}
+    outputs:
+      water: 1
+
+  # --- Foundry ---
   - id: make_steel
-    name: Make Steel
-    description: Smelt iron with coal and energy into steel
+    name: Steel
+    description: Iron ore + coal + energy → steel
     building_id: foundry
-    duration_sec: 5
+    duration_sec: 1
     inputs:
-      iron: 1
+      iron_ore: 1
       coal: 1
       energy: 1
     outputs:
       steel: 1
+
+  - id: make_copper
+    name: Copper
+    description: Copper ore + energy → copper
+    building_id: foundry
+    duration_sec: 1
+    inputs:
+      copper_ore: 1
+      energy: 1
+    outputs:
+      copper: 1
+
+  - id: make_aluminum
+    name: Aluminum
+    description: Bauxite + energy → aluminum
+    building_id: foundry
+    duration_sec: 1
+    inputs:
+      bauxite: 1
+      energy: 1
+    outputs:
+      aluminum: 1
+
+  # --- Refinery ---
+  - id: make_fuel
+    name: Fuel
+    description: Oil + energy + industrial chemicals → fuel + asphalt
+    building_id: refinery
+    duration_sec: 1
+    inputs:
+      oil: 1
+      energy: 1
+      industrial_chemicals: 1
+    outputs:
+      fuel: 1
+      asphalt: 1
+
+  - id: make_rocket_propellant
+    name: Rocket Propellant
+    description: Fuel + advanced chemicals → rocket propellant
+    building_id: refinery
+    duration_sec: 1
+    inputs:
+      fuel: 1
+      advanced_chemicals: 1
+    outputs:
+      rocket_propellant: 1
+
+  # --- Chemical Plant ---
+  - id: make_industrial_chemicals
+    name: Industrial Chemicals
+    description: Natural gas + water + energy → industrial chemicals
+    building_id: chemical_plant
+    duration_sec: 1
+    inputs:
+      natural_gas: 1
+      water: 1
+      energy: 1
+    outputs:
+      industrial_chemicals: 1
+
+  - id: make_synthetic_materials
+    name: Synthetic Materials
+    description: Industrial chemicals + oil + energy → synthetic materials
+    building_id: chemical_plant
+    duration_sec: 1
+    inputs:
+      industrial_chemicals: 1
+      oil: 1
+      energy: 1
+    outputs:
+      synthetic_materials: 1
+
+  - id: make_advanced_chemicals
+    name: Advanced Chemicals
+    description: Industrial chemicals + synthetic materials + rare minerals + energy → advanced chemicals
+    building_id: chemical_plant
+    duration_sec: 1
+    inputs:
+      industrial_chemicals: 1
+      synthetic_materials: 1
+      rare_minerals: 1
+      energy: 1
+    outputs:
+      advanced_chemicals: 1
+
+  - id: make_fertilizer
+    name: Fertilizer
+    description: Industrial chemicals + natural gas + energy → fertilizer
+    building_id: chemical_plant
+    duration_sec: 1
+    inputs:
+      industrial_chemicals: 1
+      natural_gas: 1
+      energy: 1
+    outputs:
+      fertilizer: 1
+
+  - id: make_rubber
+    name: Rubber
+    description: Industrial chemicals + synthetic materials → rubber
+    building_id: chemical_plant
+    duration_sec: 1
+    inputs:
+      industrial_chemicals: 1
+      synthetic_materials: 1
+    outputs:
+      rubber: 1
+
+  # --- Manufacturing Facility ---
+  - id: make_cement
+    name: Cement
+    description: Limestone + energy → cement
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      limestone: 1
+      energy: 1
+    outputs:
+      cement: 1
+
+  - id: make_glass
+    name: Glass
+    description: Silica + energy → glass
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      silica: 1
+      energy: 1
+    outputs:
+      glass: 1
+
+  - id: make_plastics
+    name: Plastics
+    description: Synthetic materials + energy → plastics
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      synthetic_materials: 1
+      energy: 1
+    outputs:
+      plastics: 1
+
+  - id: make_construction_materials
+    name: Construction Materials
+    description: Steel + cement + glass → construction materials
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      cement: 1
+      glass: 1
+    outputs:
+      construction_materials: 1
+
+  - id: make_components
+    name: Components
+    description: Steel + copper + plastics → components
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      copper: 1
+      plastics: 1
+    outputs:
+      components: 1
+
+  - id: make_machinery
+    name: Machinery
+    description: Steel + copper + components + energy + fuel → machinery
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      copper: 1
+      components: 1
+      energy: 1
+      fuel: 1
+    outputs:
+      machinery: 1
+
+  - id: make_textiles
+    name: Textiles
+    description: Synthetic materials + industrial chemicals + energy → textiles
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      synthetic_materials: 1
+      industrial_chemicals: 1
+      energy: 1
+    outputs:
+      textiles: 1
+
+  - id: make_advanced_materials
+    name: Advanced Materials
+    description: Aluminum + synthetic materials + advanced chemicals → advanced materials
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      aluminum: 1
+      synthetic_materials: 1
+      advanced_chemicals: 1
+    outputs:
+      advanced_materials: 1
+
+  - id: make_tires
+    name: Tires
+    description: Rubber + steel + synthetic materials → tires
+    building_id: manufacturing_facility
+    duration_sec: 1
+    inputs:
+      rubber: 1
+      steel: 1
+      synthetic_materials: 1
+    outputs:
+      tires: 1
+
+  # --- Electronics Facility ---
+  - id: make_electronic_components
+    name: Electronic Components
+    description: Silica + copper + industrial chemicals + energy → electronic components
+    building_id: electronics_facility
+    duration_sec: 1
+    inputs:
+      silica: 1
+      copper: 1
+      industrial_chemicals: 1
+      energy: 1
+    outputs:
+      electronic_components: 1
+
+  - id: make_semiconductors
+    name: Semiconductors
+    description: Silica + electronic components + advanced chemicals + energy → semiconductors
+    building_id: electronics_facility
+    duration_sec: 1
+    inputs:
+      silica: 1
+      electronic_components: 1
+      advanced_chemicals: 1
+      energy: 1
+    outputs:
+      semiconductors: 1
+
+  - id: make_advanced_electronics
+    name: Advanced Electronics
+    description: Semiconductors + copper + advanced chemicals + energy → advanced electronics
+    building_id: electronics_facility
+    duration_sec: 1
+    inputs:
+      semiconductors: 1
+      copper: 1
+      advanced_chemicals: 1
+      energy: 1
+    outputs:
+      advanced_electronics: 1
+
+  # --- Assembly Facility ---
+  - id: make_appliances
+    name: Appliances
+    description: Assemble appliances
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      plastics: 1
+      electronic_components: 1
+      semiconductors: 1
+      glass: 1
+    outputs:
+      appliances: 1
+
+  - id: make_batteries
+    name: Batteries
+    description: Assemble batteries
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      aluminum: 1
+      copper: 1
+      advanced_chemicals: 1
+      electronic_components: 1
+      semiconductors: 1
+    outputs:
+      batteries: 1
+
+  - id: make_engines
+    name: Engines
+    description: Assemble engines
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      machinery: 1
+      electronic_components: 1
+      semiconductors: 1
+      fuel: 1
+    outputs:
+      engines: 1
+
+  - id: make_robots
+    name: Robots
+    description: Assemble robots
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      machinery: 1
+      advanced_electronics: 1
+      aluminum: 1
+      components: 1
+      rubber: 1
+      semiconductors: 1
+    outputs:
+      robots: 1
+
+  - id: make_smartphone
+    name: Smartphone
+    description: Assemble smartphones
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      advanced_electronics: 1
+      glass: 1
+      plastics: 1
+      batteries: 1
+      semiconductors: 1
+    outputs:
+      smartphone: 1
+
+  - id: make_computer
+    name: Computer
+    description: Assemble computers
+    building_id: assembly_facility
+    duration_sec: 1
+    inputs:
+      advanced_electronics: 1
+      components: 1
+      aluminum: 1
+      plastics: 1
+      semiconductors: 1
+    outputs:
+      computer: 1
+
+  # --- Car Manufacturing Facility ---
+  - id: make_cars
+    name: ICE Car
+    description: Build ICE cars
+    building_id: car_manufacturing_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      aluminum: 1
+      plastics: 1
+      advanced_electronics: 1
+      machinery: 1
+      engines: 1
+      tires: 1
+      fuel: 1
+      semiconductors: 1
+    outputs:
+      cars: 1
+
+  - id: make_electric_cars
+    name: Electric Car
+    description: Build electric cars
+    building_id: car_manufacturing_facility
+    duration_sec: 1
+    inputs:
+      steel: 1
+      aluminum: 1
+      plastics: 1
+      advanced_electronics: 1
+      batteries: 1
+      machinery: 1
+      tires: 1
+      semiconductors: 1
+    outputs:
+      electric_cars: 1
+
+  # --- Plane Factory ---
+  - id: make_aircraft
+    name: Aircraft
+    description: Build aircraft
+    building_id: plane_factory
+    duration_sec: 1
+    inputs:
+      aluminum: 1
+      steel: 1
+      advanced_electronics: 1
+      machinery: 1
+      advanced_materials: 1
+      engines: 1
+      tires: 1
+      fuel: 1
+      semiconductors: 1
+    outputs:
+      aircraft: 1
+
+  - id: make_advanced_aircraft
+    name: Advanced Aircraft
+    description: Build advanced aircraft
+    building_id: plane_factory
+    duration_sec: 1
+    inputs:
+      aluminum: 1
+      advanced_electronics: 1
+      advanced_materials: 1
+      engines: 1
+      rare_minerals: 1
+      tires: 1
+      fuel: 1
+      semiconductors: 1
+    outputs:
+      advanced_aircraft: 1
+
+  # --- Rocket Factory ---
+  - id: make_rocket
+    name: Rocket
+    description: Build rockets
+    building_id: rocket_factory
+    duration_sec: 1
+    inputs:
+      steel: 1
+      aluminum: 1
+      advanced_electronics: 1
+      advanced_chemicals: 1
+      machinery: 1
+      rocket_propellant: 1
+      engines: 1
+      semiconductors: 1
+    outputs:
+      rocket: 1
+
+  # --- Satellite Factory ---
+  - id: make_satellite
+    name: Satellite
+    description: Build satellites
+    building_id: satellite_factory
+    duration_sec: 1
+    inputs:
+      aluminum: 1
+      advanced_electronics: 1
+      advanced_materials: 1
+      rare_minerals: 1
+      batteries: 1
+      semiconductors: 1
+    outputs:
+      satellite: 1
+
+  # --- Power Plant (simplified: fuel → energy, no energy input) ---
+  - id: coal_power
+    name: Coal Power
+    description: Coal → energy
+    building_id: power_plant
+    duration_sec: 1
+    inputs:
+      coal: 1
+    outputs:
+      energy: 1
+
+  - id: gas_power
+    name: Gas Power
+    description: Natural gas → energy
+    building_id: power_plant
+    duration_sec: 1
+    inputs:
+      natural_gas: 1
+    outputs:
+      energy: 1
+
+  - id: oil_power
+    name: Oil Power
+    description: Fuel → energy
+    building_id: power_plant
+    duration_sec: 1
+    inputs:
+      fuel: 1
+    outputs:
+      energy: 1

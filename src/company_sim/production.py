@@ -87,10 +87,10 @@ def load_default_production(items: ItemCatalog) -> ProductionCatalog:
         {
             "make_steel": ProductionMethod(
                 id="make_steel",
-                name="Make Steel",
-                inputs={"iron": 1, "coal": 1, "energy": 1},
+                name="Steel",
+                inputs={"iron_ore": 1, "coal": 1, "energy": 1},
                 outputs={"steel": 1},
-                duration_sec=5.0,
+                duration_sec=1.0,
                 building_id="foundry",
             )
         }
