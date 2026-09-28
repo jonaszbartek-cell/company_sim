@@ -43,7 +43,7 @@ class BuildingDefinition:
             "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
             "art": {
-                "map": f"/static/assets/buildings/map/{self.id}.svg",
+                "map": f"/static/assets/buildings/map/{self.id}/1x1.svg",
                 "ui": f"/static/assets/buildings/ui/{self.id}.svg",
             },
         }
@@ -72,6 +72,21 @@ class Building:
     storage: Inventory = field(default_factory=Inventory)
     # Materialized at build / reconcile: item_id -> capacity
     storage_capacity: dict[str, int] = field(default_factory=dict)
+    # Footprint in plots (rectangular group this building occupies)
+    footprint_w: int = 1
+    footprint_h: int = 1
+    # Top-left of the footprint in world coords (for multi-plot map art)
+    anchor_x: int | None = None
+    anchor_y: int | None = None
+
+    @property
+    def footprint_size(self) -> int:
+        return max(1, int(self.footprint_w) * int(self.footprint_h))
+
+    def map_art_path(self) -> str:
+        w = max(1, min(9, int(self.footprint_w)))
+        h = max(1, min(9, int(self.footprint_h)))
+        return f"/static/assets/buildings/map/{self.building_id}/{w}x{h}.svg"
 
     def materialize_storage(self, capacity: dict[str, int]) -> None:
         """Create hard storage slots from a capacity map (call on build)."""
@@ -122,8 +137,13 @@ class Building:
             "progress": self.progress,
             "storage": self.storage.as_dict(),
             "storage_capacity": dict(self.storage_capacity),
+            "footprint_w": int(self.footprint_w),
+            "footprint_h": int(self.footprint_h),
+            "footprint_size": self.footprint_size,
+            "anchor_x": self.anchor_x,
+            "anchor_y": self.anchor_y,
             "art": {
-                "map": f"/static/assets/buildings/map/{self.building_id}.svg",
+                "map": self.map_art_path(),
                 "ui": f"/static/assets/buildings/ui/{self.building_id}.svg",
             },
         }

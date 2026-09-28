@@ -397,16 +397,19 @@ class World:
             raise ActionError("Not a plot")
         if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
-        if tile.plot.building is not None:
-            raise ActionError("Plot already has a building")
-        if tile.plot.reserved_proposal_id is not None:
-            raise ActionError("Plot is reserved by a pending proposal")
         try:
             bdef = self.buildings.get(building_id)
         except KeyError as exc:
             raise ActionError(f"Unknown building: {building_id}") from exc
-        if not bdef.allows_plot_type(tile.plot.plot_type):
-            raise ActionError(f"{bdef.name} cannot be built on {tile.plot.plot_type.value} plots")
+        group = self.grid.combined_group(x, y) or [(x, y)]
+        for cx, cy in group:
+            p = self.grid.get(cx, cy).plot
+            if p and p.building is not None:
+                raise ActionError("Plot already has a building")
+            if p and p.reserved_proposal_id is not None:
+                raise ActionError("Plot is reserved by a pending proposal")
+            if p and not bdef.allows_plot_type(p.plot_type):
+                raise ActionError(f"{bdef.name} cannot be built on {p.plot_type.value} plots")
         if actor.cash < bdef.build_cost:
             raise ActionError("Not enough cash")
         if bdef.build_cost_items and not actor.inventory.has(bdef.build_cost_items):
@@ -427,14 +430,24 @@ class World:
             production_method_id=method_id,
             status="idle",
             storage=Inventory(),
+            anchor_x=x,
+            anchor_y=y,
         )
         # Hard slots: every good used/made by this building type appears at build time
         building.materialize_storage(self.content.storage_capacity_for_building(building_id))
-        tile.plot.building = building
+        try:
+            ax, ay, fw, fh = self.grid.place_building_on_group(x, y, building)
+        except ValueError as exc:
+            # Refund on failed placement
+            actor.cash += bdef.build_cost
+            if bdef.build_cost_items:
+                for item_id, qty in bdef.build_cost_items.items():
+                    actor.inventory.add(item_id, qty)
+            raise ActionError(str(exc)) from exc
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
-            f"Built {bdef.name} at ({x},{y})",
+            f"Built {bdef.name} at ({ax},{ay}) size {fw}x{fh}",
             {
                 "cost": bdef.build_cost,
                 "cost_items": dict(bdef.build_cost_items),
@@ -442,6 +455,10 @@ class World:
                 "production_method_id": method_id,
                 "storage": building.storage.as_dict(),
                 "storage_capacity": dict(building.storage_capacity),
+                "footprint_w": fw,
+                "footprint_h": fh,
+                "anchor_x": ax,
+                "anchor_y": ay,
             },
         )
 
@@ -558,12 +575,13 @@ class World:
         b = tile.plot.building
         bdef = self.buildings.get(b.building_id)
         refund_items = {k: int(v) // 10 for k, v in bdef.build_cost_items.items() if int(v) // 10 > 0}
-        returned_storage = dict(b.storage.as_dict())
+        returned_storage = {k: v for k, v in b.storage.as_dict().items() if v}
         for item_id, qty in returned_storage.items():
             actor.inventory.add(item_id, qty)
         for item_id, qty in refund_items.items():
             actor.inventory.add(item_id, qty)
-        tile.plot.building = None
+        fw, fh = b.footprint_w, b.footprint_h
+        self.grid.clear_building_from_group(x, y)
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
@@ -572,6 +590,8 @@ class World:
                 "refund_items": refund_items,
                 "returned_storage": returned_storage,
                 "building_id": b.building_id,
+                "footprint_w": fw,
+                "footprint_h": fh,
             },
         )
 
@@ -672,18 +692,32 @@ class World:
         return self.build_road("company", company_id, x, y, side)
 
     def merge_plots(self, owner_kind: str, owner_id: str, x1: int, y1: int, x2: int, y2: int) -> ActionResult:
-        """Combine two adjacent plots (flag only). Forbidden if a road is between them."""
+        """Combine adjacent plots (empty, expand building onto empty, or same building)."""
         self.get_actor(owner_kind, owner_id)
         try:
             self.grid.combine_plots(x1, y1, x2, y2, owner_kind, owner_id)
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
         size = self.grid.group_size(x1, y1)
+        tile = self.grid.get(x1, y1)
+        b = tile.plot.building if tile.plot else None
+        data: dict = {"size": size, "x1": x1, "y1": y1, "x2": x2, "y2": y2}
+        if b:
+            data.update(
+                {
+                    "building_id": b.building_id,
+                    "footprint_w": b.footprint_w,
+                    "footprint_h": b.footprint_h,
+                    "anchor_x": b.anchor_x,
+                    "anchor_y": b.anchor_y,
+                }
+            )
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
-            f"Combined plots ({x1},{y1})+({x2},{y2}) — group size {size}",
-            {"size": size, "x1": x1, "y1": y1, "x2": x2, "y2": y2},
+            f"Combined plots ({x1},{y1})+({x2},{y2}) — group size {size}"
+            + (f", building {b.footprint_w}x{b.footprint_h}" if b else ""),
+            data,
         )
 
 
