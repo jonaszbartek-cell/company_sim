@@ -12,25 +12,44 @@ from company_sim.content import GameContent
 from company_sim.contracts import ContractBid, GovernmentContract, GovernmentContractBook
 from company_sim.items import Inventory
 from company_sim.mailboxes import MailboxStore, actor_key, parse_actor_key
-from company_sim.map_grid import GridMap, TileKind, generate_map
+from company_sim.map_grid import GridMap, generate_map, place_city_seeds
 from company_sim.market import Listing, Market
 from company_sim.persistence import GamePersistence, default_save_dir
+from company_sim.plots import SIDES
 from company_sim.proposals import DirectProposal, ProposalBook
+
+
+CITY_NAMES = ["Millhaven", "Northport", "Riverbend", "Oakridge", "Southgate", "Eastmere", "Westhold", "Hillford"]
 
 
 @dataclass
 class WorldConfig:
-    map_width: int = 24
-    map_height: int = 18
-    tick_hz: float = 4.0  # UI refresh / delay pacing only
+    map_size: int = 12  # plots per side (square map)
+    tick_hz: float = 4.0
     starting_cities: int = 1
     ai_company_count: int = 2
-    road_stride: int = 3
     player_starting_cash: int = 2500
-    road_build_cost: int = 50  # PLACEHOLDER
-    # Seconds of wall time between AI agent turns (slow-down only; never speeds sim)
+    road_build_cost: int = 50
     min_seconds_between_turns: float = 1.5
     save_dir: str | None = None
+    # Deprecated aliases (tests / older callers); folded into map_size in __post_init__
+    map_width: int | None = None
+    map_height: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.map_width is not None or self.map_height is not None:
+            w = self.map_width if self.map_width is not None else self.map_size
+            h = self.map_height if self.map_height is not None else self.map_size
+            self.map_size = max(int(w), int(h))
+        self.map_size = int(self.map_size)
+
+    @property
+    def map_w(self) -> int:
+        return self.map_size
+
+    @property
+    def map_h(self) -> int:
+        return self.map_size
 
 
 def _starter_inventory() -> Inventory:
@@ -52,9 +71,9 @@ class World:
     time_sec: float = 0.0
     paused: bool = False
     tick_index: int = 0
-    # Round-robin index into turn_queue (AI companies + cities; player acts via UI)
     turn_index: int = 0
     persistence: GamePersistence = field(default_factory=GamePersistence)
+    started: bool = True
 
     @property
     def items(self):
@@ -71,19 +90,24 @@ class World:
     @classmethod
     def new_game(cls, config: WorldConfig | None = None) -> World:
         config = config or WorldConfig()
+        if config.map_size < 2:
+            raise ActionError("map_size must be at least 2")
+        if config.starting_cities < 1:
+            raise ActionError("Need at least one city")
+        if config.ai_company_count < 0:
+            raise ActionError("ai_company_count cannot be negative")
+
         content = GameContent.load()
+        centers = place_city_seeds(config.map_size, config.starting_cities)
+        seeds = []
+        for i, (cx, cy) in enumerate(centers):
+            cid = f"city_{chr(ord('a') + i)}" if i < 26 else f"city_{i+1}"
+            name = CITY_NAMES[i % len(CITY_NAMES)]
+            if i >= len(CITY_NAMES):
+                name = f"{name} {i+1}"
+            seeds.append((cid, name, cx, cy, 1000 + i * 50))
 
-        # Scoped seed: one city for now
-        seeds = [
-            ("city_a", "Millhaven", config.map_width // 2, config.map_height // 2, 1100),
-        ][: config.starting_cities]
-
-        grid = generate_map(
-            config.map_width,
-            config.map_height,
-            city_seeds=seeds,
-            road_stride=config.road_stride,
-        )
+        grid = generate_map(config.map_size, city_seeds=seeds)
         save_root = Path(config.save_dir) if config.save_dir else default_save_dir()
         world = cls(
             config=config,
@@ -94,8 +118,18 @@ class World:
             gov_contracts=GovernmentContractBook(),
             mailboxes=MailboxStore(root=save_root),
             persistence=GamePersistence(save_root),
+            started=True,
         )
 
+        # Cities own every plot in their territory
+        for tile in grid.tiles:
+            if tile.plot and tile.city_id:
+                tile.plot.claim("city", tile.city_id)
+
+        for city in grid.cities.values():
+            city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
+
+        # Player + AI companies start with NO plots
         player = Company(
             id="player",
             name="Player Co",
@@ -105,7 +139,6 @@ class World:
         )
         world.companies[player.id] = player
         world.player_company_id = player.id
-        world._assign_starter_plot("company", player.id)
 
         for i in range(config.ai_company_count):
             cid = f"ai_{i+1}"
@@ -116,15 +149,8 @@ class World:
                 cash=1500,
                 inventory=Inventory({"iron": 10, "coal": 10, "energy": 10, "steel": 0}),
             )
-            world._assign_starter_plot("company", cid)
 
-        for city in grid.cities.values():
-            city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
-            world._assign_starter_plot("city", city.id, near=(city.center_x, city.center_y))
-
-        # Seed a few market sell listings from nowhere (starter liquidity)
         world._seed_market()
-        # Generate C(n,2) mailbox files for the full cast (player + AI cos + cities)
         assert world.mailboxes is not None
         world.mailboxes.ensure_all_pairs(world.iter_all_actors())
         world.persistence.save_all(world)
@@ -136,8 +162,6 @@ class World:
         return self.mailboxes
 
     def _seed_market(self) -> None:
-        """Seed a thin company-backed board. Cities never touch the market."""
-        # Give each AI company a small public sell so the board is not empty.
         for company in self.companies.values():
             if company.is_player:
                 continue
@@ -161,7 +185,7 @@ class World:
 
     def _require_company(self, kind: str, actor_id: str) -> Company:
         if kind != "company":
-            raise ActionError("Only companies can use the market / company trade actions")
+            raise ActionError("Only companies can use the market / goods trade actions")
         actor = self.get_actor("company", actor_id)
         assert isinstance(actor, Company)
         return actor
@@ -183,7 +207,6 @@ class World:
         return actor
 
     def iter_ai_actors(self) -> list[Actor]:
-        """AI turn order: rival companies first, then cities."""
         actors: list[Actor] = [c for c in self.companies.values() if not c.is_player]
         actors.extend(self.grid.cities.values())
         return actors
@@ -216,65 +239,22 @@ class World:
         return [
             t
             for t in self.grid.tiles
-            if t.kind == TileKind.PLOT
-            and t.plot
-            and t.plot.owner_kind == kind
-            and t.plot.owner_id == actor_id
+            if t.plot and t.plot.owner_kind == kind and t.plot.owner_id == actor_id
         ]
 
-    def _assign_starter_plot(
-        self,
-        owner_kind: str,
-        owner_id: str,
-        near: tuple[int, int] | None = None,
-    ) -> None:
-        if near is None:
-            cities = list(self.grid.cities.values())
-            if not cities:
-                return
-            near = (cities[0].center_x, cities[0].center_y)
-        nx0, ny0 = near
-        candidates = []
-        for tile in self.grid.tiles:
-            if tile.kind != TileKind.PLOT or not tile.plot:
-                continue
-            if tile.plot.owner_id is not None:
-                continue
-            if not self.grid.is_road_access(tile.x, tile.y):
-                continue
-            if owner_kind == "city" and tile.city_id != owner_id:
-                continue
-            dist = abs(tile.x - nx0) + abs(tile.y - ny0)
-            candidates.append((dist, tile))
-        if not candidates:
-            return
-        candidates.sort(key=lambda t: t[0])
-        tile = candidates[0][1]
-        tile.plot.claim(owner_kind, owner_id)
-        tile.plot.price = 0
-        tile.plot.value = tile.plot.value or 100
-        self.grid.register_single_parcel(tile.x, tile.y)
-
-    # --- Day scheduling -------------------------------------------------
-
     def tick(self, dt: float) -> None:
-        """Wall-clock pacing only (UI). Game days advance via agent actions."""
         if self.paused:
             return
         self.time_sec += dt
         self.tick_index += 1
 
     def note_actor_action(self, kind: str, actor_id: str) -> None:
-        """Mark that this actor took an action this day; persist; maybe advance day."""
         actor = self.get_actor(kind, actor_id)
         actor.mark_acted()
         self._maybe_advance_day()
-        # Always persist after a state-changing action (day advance may have
-        # already saved; saving again is cheap and keeps files current).
         self.persistence.save_all(self)
 
     def _maybe_advance_day(self) -> None:
-        """One game day passes when ALL companies have made an action."""
         companies = self.iter_companies()
         if not companies:
             return
@@ -294,28 +274,7 @@ class World:
         if queue:
             self.turn_index = (self.turn_index + 1) % len(queue)
 
-    # --- Core actions ---------------------------------------------------
-
-    def buy_plot(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
-        actor = self.get_actor(owner_kind, owner_id)
-        if not self.grid.in_bounds(x, y):
-            raise ActionError("Out of bounds")
-        tile = self.grid.get(x, y)
-        if tile.kind != TileKind.PLOT or tile.plot is None:
-            raise ActionError("Not a buyable plot")
-        if tile.plot.is_owned:
-            raise ActionError("Plot already owned")
-        if not self.grid.is_road_access(x, y):
-            raise ActionError("Plot has no road access")
-        price = tile.plot.price
-        if actor.cash < price:
-            raise ActionError("Not enough cash")
-        actor.cash -= price
-        tile.plot.claim(owner_kind, owner_id)
-        tile.plot.value = max(tile.plot.value, price)
-        self.grid.register_single_parcel(x, y)
-        self.note_actor_action(owner_kind, owner_id)
-        return ActionResult(True, f"Bought plot ({x},{y}) for {price}", {"x": x, "y": y, "price": price})
+    # --- Core land actions ----------------------------------------------
 
     def build_building(
         self,
@@ -327,12 +286,14 @@ class World:
     ) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
-        if tile.kind != TileKind.PLOT or not tile.plot:
+        if not tile.plot:
             raise ActionError("Not a plot")
         if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
         if tile.plot.building is not None:
             raise ActionError("Plot already has a building")
+        if tile.plot.reserved_proposal_id is not None:
+            raise ActionError("Plot is reserved by a pending proposal")
         try:
             bdef = self.buildings.get(building_id)
         except KeyError as exc:
@@ -344,7 +305,6 @@ class World:
 
         methods = self.content.methods_for_building(building_id)
         method_id = methods[0].id if methods else None
-
         actor.cash -= bdef.build_cost
         tile.plot.building = Building(
             building_id=building_id,
@@ -369,7 +329,7 @@ class World:
         method_id: str,
     ) -> ActionResult:
         tile = self.grid.get(x, y)
-        if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
+        if not tile.plot or not tile.plot.building:
             raise ActionError("No building there")
         b = tile.plot.building
         if not tile.plot.owned_by(owner_kind, owner_id):
@@ -385,10 +345,9 @@ class World:
         return ActionResult(True, f"Set method {method_id}", {"method_id": method_id})
 
     def produce(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
-        """Run one production batch on a building (explicit day action)."""
         actor = self.get_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
-        if tile.kind != TileKind.PLOT or not tile.plot or not tile.plot.building:
+        if not tile.plot or not tile.plot.building:
             raise ActionError("No building there")
         if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
@@ -406,11 +365,9 @@ class World:
 
         b.status = "working"
         actor.inventory.consume(method.inputs)
-        # Parcel bonus: chance of extra output unit (simple floor of bonus)
-        bonus = self.grid.production_bonus_for_plot(tile.plot)
+        bonus = self.grid.production_bonus_at(x, y)
         actor.inventory.produce(method.outputs)
         if bonus > 1.0 and int(bonus) > 1:
-            # PLACEHOLDER: grant floor(bonus)-1 extra full output sets rarely skipped
             for _ in range(int(bonus) - 1):
                 actor.inventory.produce(method.outputs)
         self.note_actor_action(owner_kind, owner_id)
@@ -420,43 +377,55 @@ class World:
             {"inputs": method.inputs, "outputs": method.outputs, "bonus": bonus},
         )
 
-    def build_road(self, actor_kind: str, actor_id: str, x: int, y: int) -> ActionResult:
+    def build_road(self, actor_kind: str, actor_id: str, x: int, y: int, side: str) -> ActionResult:
+        """Build a road on one side of an owned square plot."""
         actor = self.get_actor(actor_kind, actor_id)
+        side = side.upper()
+        if side not in SIDES:
+            raise ActionError(f"Invalid side {side}; use N/E/S/W")
+        tile = self.grid.get(x, y)
+        if not tile.plot:
+            raise ActionError("Not a plot")
+        if not tile.plot.owned_by(actor_kind, actor_id):
+            raise ActionError("You must own the plot to build a road on its edge")
         cost = self.config.road_build_cost
         if actor.cash < cost:
             raise ActionError("Not enough cash")
-        if not self.grid.build_road(x, y):
-            raise ActionError("Cannot build road there")
+        try:
+            self.grid.build_edge_road(x, y, side)
+        except ValueError as exc:
+            raise ActionError(str(exc)) from exc
         actor.cash -= cost
-        self.grid.rebuild_territories()
         self.note_actor_action(actor_kind, actor_id)
         return ActionResult(
             True,
-            f"{actor_kind} {actor_id} built road at ({x},{y})",
-            {"cost": cost},
+            f"Built road on {side} side of ({x},{y})",
+            {"cost": cost, "side": side, "x": x, "y": y},
         )
 
-    def city_build_road(self, city_id: str, x: int, y: int) -> ActionResult:
-        return self.build_road("city", city_id, x, y)
+    def city_build_road(self, city_id: str, x: int, y: int, side: str) -> ActionResult:
+        return self.build_road("city", city_id, x, y, side)
 
-    def company_build_road(self, company_id: str, x: int, y: int) -> ActionResult:
-        return self.build_road("company", company_id, x, y)
+    def company_build_road(self, company_id: str, x: int, y: int, side: str) -> ActionResult:
+        return self.build_road("company", company_id, x, y, side)
 
     def merge_plots(self, owner_kind: str, owner_id: str, x1: int, y1: int, x2: int, y2: int) -> ActionResult:
+        """Combine two adjacent plots (flag only). Forbidden if a road is between them."""
         self.get_actor(owner_kind, owner_id)
-        for x, y in ((x1, y1), (x2, y2)):
-            tile = self.grid.get(x, y)
-            if tile.plot and tile.plot.owned_by(owner_kind, owner_id) and not tile.plot.parcel_id:
-                self.grid.register_single_parcel(x, y)
         try:
-            parcel_id = self.grid.merge_plots(owner_kind, owner_id, x1, y1, x2, y2)
+            self.grid.combine_plots(x1, y1, x2, y2, owner_kind, owner_id)
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
-        size = self.grid.parcel_size(parcel_id)
+        size = self.grid.group_size(x1, y1)
         self.note_actor_action(owner_kind, owner_id)
-        return ActionResult(True, f"Merged plots into parcel ({size} cells)", {"parcel_id": parcel_id, "size": size})
+        return ActionResult(
+            True,
+            f"Combined plots ({x1},{y1})+({x2},{y2}) — group size {size}",
+            {"size": size, "x1": x1, "y1": y1, "x2": x2, "y2": y2},
+        )
 
-    # --- Market ---------------------------------------------------------
+
+    # --- Market (companies only) ----------------------------------------
 
     def post_sell(
         self,
@@ -714,7 +683,7 @@ class World:
                 break
         return matched
 
-    # --- Direct proposals (AGENT↔AGENT) ---------------------------------
+    # --- Direct proposals: goods + plots (accept / reject) --------------
 
     def propose_sell(
         self,
@@ -725,7 +694,7 @@ class World:
         quantity: int,
         price: int,
     ) -> ActionResult:
-        """Direct sell proposal: reserve goods from proposer until accept/reject."""
+        """Direct goods sell: reserve goods until accept/reject."""
         proposer = self._require_company(from_kind, from_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
@@ -733,7 +702,7 @@ class World:
             raise ActionError(f"Unknown item: {item_id}")
         to_kind, to_id = self.resolve_counterpart(to)
         if to_kind != "company":
-            raise ActionError("Cities do not use direct trade — use government contracts")
+            raise ActionError("Cities do not use goods trade — use government contracts")
         if from_kind == to_kind and from_id == to_id:
             raise ActionError("Cannot propose to yourself")
         self.get_actor(to_kind, to_id)
@@ -743,7 +712,7 @@ class World:
         pid = self.proposals.next_id()
         prop = DirectProposal(
             id=pid,
-            side="sell",
+            proposal_type="goods_sell",
             item_id=item_id,
             quantity=quantity,
             price=price,
@@ -760,7 +729,7 @@ class World:
                 from_kind,
                 from_id,
                 f"{to_kind}:{to_id}",
-                f"[PROPOSAL #{pid} SELL] {quantity}x {item_id} @ {price}/u — accept_proposal {pid}",
+                f"[PROPOSAL #{pid} goods_sell] {quantity}x {item_id} @ {price}/u — accept or reject",
             )
         except ActionError:
             pass
@@ -780,7 +749,7 @@ class World:
         quantity: int,
         price: int,
     ) -> ActionResult:
-        """Direct buy proposal: reserve cash from proposer until accept/reject."""
+        """Direct goods buy: reserve cash until accept/reject."""
         proposer = self._require_company(from_kind, from_id)
         if quantity <= 0 or price < 0:
             raise ActionError("Invalid quantity/price")
@@ -788,7 +757,7 @@ class World:
             raise ActionError(f"Unknown item: {item_id}")
         to_kind, to_id = self.resolve_counterpart(to)
         if to_kind != "company":
-            raise ActionError("Cities do not use direct trade — use government contracts")
+            raise ActionError("Cities do not use goods trade — use government contracts")
         if from_kind == to_kind and from_id == to_id:
             raise ActionError("Cannot propose to yourself")
         self.get_actor(to_kind, to_id)
@@ -799,7 +768,7 @@ class World:
         pid = self.proposals.next_id()
         prop = DirectProposal(
             id=pid,
-            side="buy",
+            proposal_type="goods_buy",
             item_id=item_id,
             quantity=quantity,
             price=price,
@@ -816,7 +785,7 @@ class World:
                 from_kind,
                 from_id,
                 f"{to_kind}:{to_id}",
-                f"[PROPOSAL #{pid} BUY] {quantity}x {item_id} @ {price}/u — accept_proposal {pid}",
+                f"[PROPOSAL #{pid} goods_buy] {quantity}x {item_id} @ {price}/u — accept or reject",
             )
         except ActionError:
             pass
@@ -827,8 +796,135 @@ class World:
             prop.to_public_dict(),
         )
 
+    def propose_plot_sell(
+        self,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        x: int,
+        y: int,
+        price: int,
+    ) -> ActionResult:
+        """Owner offers to sell an owned plot at a total price. Plot is reserved."""
+        self.get_actor(from_kind, from_id)
+        if price < 0:
+            raise ActionError("Invalid price")
+        if not self.grid.in_bounds(x, y):
+            raise ActionError("Out of bounds")
+        tile = self.grid.get(x, y)
+        if not tile.plot:
+            raise ActionError("Not a plot")
+        if not tile.plot.owned_by(from_kind, from_id):
+            raise ActionError("You do not own this plot")
+        if tile.plot.reserved_proposal_id is not None:
+            raise ActionError("Plot is already reserved by a pending proposal")
+        to_kind, to_id = self.resolve_counterpart(to)
+        if from_kind == to_kind and from_id == to_id:
+            raise ActionError("Cannot propose to yourself")
+        self.get_actor(to_kind, to_id)
+        pid = self.proposals.next_id()
+        prop = DirectProposal(
+            id=pid,
+            proposal_type="plot_sell",
+            price=price,
+            from_kind=from_kind,
+            from_id=from_id,
+            to_kind=to_kind,
+            to_id=to_id,
+            day_created=self.day,
+            plot_x=x,
+            plot_y=y,
+            plot_id=tile.plot.id,
+        )
+        tile.plot.reserved_proposal_id = pid
+        self.proposals.add(prop)
+        try:
+            self.send_message(
+                from_kind,
+                from_id,
+                f"{to_kind}:{to_id}",
+                f"[PROPOSAL #{pid} plot_sell] plot ({x},{y}) for {price} — accept or reject",
+            )
+        except ActionError:
+            pass
+        self.note_actor_action(from_kind, from_id)
+        return ActionResult(
+            True,
+            f"Plot sell proposal #{pid}: ({x},{y}) @ {price} → {to_kind}:{to_id}",
+            prop.to_public_dict(),
+        )
+
+    def propose_plot_buy(
+        self,
+        from_kind: str,
+        from_id: str,
+        to: str,
+        x: int,
+        y: int,
+        price: int,
+    ) -> ActionResult:
+        """Buyer escrows cash and offers to buy a specific plot from its owner."""
+        buyer = self.get_actor(from_kind, from_id)
+        if price < 0:
+            raise ActionError("Invalid price")
+        if not self.grid.in_bounds(x, y):
+            raise ActionError("Out of bounds")
+        tile = self.grid.get(x, y)
+        if not tile.plot:
+            raise ActionError("Not a plot")
+        if not tile.plot.is_owned:
+            raise ActionError("Plot has no owner")
+        if tile.plot.owned_by(from_kind, from_id):
+            raise ActionError("You already own this plot")
+        if tile.plot.reserved_proposal_id is not None:
+            raise ActionError("Plot is already reserved by a pending proposal")
+        to_kind, to_id = self.resolve_counterpart(to)
+        if from_kind == to_kind and from_id == to_id:
+            raise ActionError("Cannot propose to yourself")
+        # Must address the current owner
+        if not tile.plot.owned_by(to_kind, to_id):
+            raise ActionError(
+                f"Recipient is not the owner (owner={tile.plot.owner_kind}:{tile.plot.owner_id})"
+            )
+        if buyer.cash < price:
+            raise ActionError("Not enough cash to propose plot buy")
+        buyer.cash -= price
+        pid = self.proposals.next_id()
+        prop = DirectProposal(
+            id=pid,
+            proposal_type="plot_buy",
+            price=price,
+            from_kind=from_kind,
+            from_id=from_id,
+            to_kind=to_kind,
+            to_id=to_id,
+            day_created=self.day,
+            plot_x=x,
+            plot_y=y,
+            plot_id=tile.plot.id,
+        )
+        tile.plot.reserved_proposal_id = pid
+        self.proposals.add(prop)
+        self.proposals.reserved_cash[pid] = price
+        try:
+            self.send_message(
+                from_kind,
+                from_id,
+                f"{to_kind}:{to_id}",
+                f"[PROPOSAL #{pid} plot_buy] offer {price} for plot ({x},{y}) — accept or reject",
+            )
+        except ActionError:
+            pass
+        self.note_actor_action(from_kind, from_id)
+        return ActionResult(
+            True,
+            f"Plot buy proposal #{pid}: ({x},{y}) @ {price} → {to_kind}:{to_id}",
+            prop.to_public_dict(),
+        )
+
     def accept_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
-        self._require_company(owner_kind, owner_id)
+        """Recipient accepts a pending direct proposal (goods or plot)."""
+        self.get_actor(owner_kind, owner_id)
         prop = self.proposals.get(proposal_id)
         if prop is None:
             raise ActionError(f"Unknown proposal #{proposal_id}")
@@ -836,35 +932,23 @@ class World:
             raise ActionError(f"Proposal #{proposal_id} is {prop.status}")
         if not (prop.to_kind == owner_kind and prop.to_id == owner_id):
             raise ActionError("Only the recipient can accept this proposal")
-        counterpart = self.get_actor(owner_kind, owner_id)
-        proposer = self.get_actor(prop.from_kind, prop.from_id)
 
-        if prop.side == "sell":
-            total = prop.total
-            if counterpart.cash < total:
-                raise ActionError("Not enough cash to accept sell proposal")
-            reserved = self.proposals.reserved_goods.pop(proposal_id, None)
-            if reserved != (prop.item_id, prop.quantity):
-                raise ActionError("Reserved goods missing for proposal")
-            counterpart.cash -= total
-            proposer.cash += total
-            counterpart.inventory.add(prop.item_id, prop.quantity)
+        if prop.proposal_type in ("goods_sell", "goods_buy"):
+            if owner_kind != "company":
+                raise ActionError("Only companies accept goods proposals")
+            self._accept_goods_proposal(prop, owner_kind, owner_id)
+        elif prop.proposal_type in ("plot_sell", "plot_buy"):
+            self._accept_plot_proposal(prop, owner_kind, owner_id)
         else:
-            if counterpart.inventory.get(prop.item_id) < prop.quantity:
-                raise ActionError("Not enough goods to accept buy proposal")
-            reserved_cash = self.proposals.reserved_cash.pop(proposal_id, None)
-            if reserved_cash != prop.total:
-                raise ActionError("Reserved cash missing for proposal")
-            counterpart.inventory.add(prop.item_id, -prop.quantity)
-            proposer.inventory.add(prop.item_id, prop.quantity)
-            counterpart.cash += prop.total
+            raise ActionError(f"Unknown proposal type {prop.proposal_type}")
 
         prop.status = "accepted"
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(True, f"Accepted proposal #{proposal_id}", prop.to_public_dict())
 
     def reject_proposal(self, owner_kind: str, owner_id: str, proposal_id: int) -> ActionResult:
-        self._require_company(owner_kind, owner_id)
+        """Recipient rejects or proposer cancels a pending proposal."""
+        self.get_actor(owner_kind, owner_id)
         prop = self.proposals.get(proposal_id)
         if prop is None:
             raise ActionError(f"Unknown proposal #{proposal_id}")
@@ -877,22 +961,95 @@ class World:
         self._release_proposal_reservation(prop)
         prop.status = "cancelled" if is_proposer else "rejected"
         self.note_actor_action(owner_kind, owner_id)
-        return ActionResult(True, f"{prop.status.capitalize()} proposal #{proposal_id}", prop.to_public_dict())
+        return ActionResult(
+            True,
+            f"{prop.status.capitalize()} proposal #{proposal_id}",
+            prop.to_public_dict(),
+        )
+
+    def _accept_goods_proposal(self, prop: DirectProposal, owner_kind: str, owner_id: str) -> None:
+        counterpart = self.get_actor(owner_kind, owner_id)
+        proposer = self.get_actor(prop.from_kind, prop.from_id)
+        if prop.proposal_type == "goods_sell":
+            total = prop.total
+            if counterpart.cash < total:
+                raise ActionError("Not enough cash to accept sell proposal")
+            reserved = self.proposals.reserved_goods.pop(prop.id, None)
+            if reserved != (prop.item_id, prop.quantity):
+                raise ActionError("Reserved goods missing for proposal")
+            counterpart.cash -= total
+            proposer.cash += total
+            counterpart.inventory.add(prop.item_id, prop.quantity)
+        else:  # goods_buy
+            if counterpart.inventory.get(prop.item_id) < prop.quantity:
+                raise ActionError("Not enough goods to accept buy proposal")
+            reserved_cash = self.proposals.reserved_cash.pop(prop.id, None)
+            if reserved_cash != prop.total:
+                raise ActionError("Reserved cash missing for proposal")
+            counterpart.inventory.add(prop.item_id, -prop.quantity)
+            proposer.inventory.add(prop.item_id, prop.quantity)
+            counterpart.cash += prop.total
+
+    def _accept_plot_proposal(self, prop: DirectProposal, owner_kind: str, owner_id: str) -> None:
+        if prop.plot_x is None or prop.plot_y is None:
+            raise ActionError("Proposal missing plot coordinates")
+        x, y = prop.plot_x, prop.plot_y
+        tile = self.grid.get(x, y)
+        if not tile.plot or tile.plot.id != prop.plot_id:
+            raise ActionError("Plot no longer matches proposal")
+        if tile.plot.reserved_proposal_id != prop.id:
+            raise ActionError("Plot reservation mismatch")
+
+        if prop.proposal_type == "plot_sell":
+            # Recipient (buyer) pays; proposer is seller/owner
+            if not tile.plot.owned_by(prop.from_kind, prop.from_id):
+                raise ActionError("Seller no longer owns the plot")
+            buyer = self.get_actor(owner_kind, owner_id)
+            seller = self.get_actor(prop.from_kind, prop.from_id)
+            if buyer.cash < prop.price:
+                raise ActionError("Not enough cash to accept plot sell")
+            buyer.cash -= prop.price
+            seller.cash += prop.price
+            self.grid.clear_combines_at(x, y)
+            tile.plot.claim(owner_kind, owner_id)
+            if tile.plot.building:
+                tile.plot.building.owner_kind = owner_kind
+                tile.plot.building.owner_id = owner_id
+            tile.plot.reserved_proposal_id = None
+        else:  # plot_buy — recipient is owner/seller; proposer is buyer with escrowed cash
+            if not tile.plot.owned_by(owner_kind, owner_id):
+                raise ActionError("You no longer own this plot")
+            reserved_cash = self.proposals.reserved_cash.pop(prop.id, None)
+            if reserved_cash != prop.price:
+                raise ActionError("Reserved cash missing for plot proposal")
+            seller = self.get_actor(owner_kind, owner_id)
+            buyer = self.get_actor(prop.from_kind, prop.from_id)
+            seller.cash += prop.price
+            self.grid.clear_combines_at(x, y)
+            tile.plot.claim(prop.from_kind, prop.from_id)
+            if tile.plot.building:
+                tile.plot.building.owner_kind = prop.from_kind
+                tile.plot.building.owner_id = prop.from_id
+            tile.plot.reserved_proposal_id = None
 
     def _release_proposal_reservation(self, prop: DirectProposal) -> None:
         proposer = self.get_actor(prop.from_kind, prop.from_id)
-        if prop.side == "sell":
+        if prop.proposal_type == "goods_sell":
             reserved = self.proposals.reserved_goods.pop(prop.id, None)
             if reserved:
                 item_id, qty = reserved
                 proposer.inventory.add(item_id, qty)
-        else:
+        elif prop.proposal_type in ("goods_buy", "plot_buy"):
             reserved_cash = self.proposals.reserved_cash.pop(prop.id, None)
             if reserved_cash:
                 proposer.cash += reserved_cash
+        if prop.proposal_type in ("plot_sell", "plot_buy") and prop.plot_x is not None:
+            tile = self.grid.get(prop.plot_x, prop.plot_y)
+            if tile.plot and tile.plot.reserved_proposal_id == prop.id:
+                tile.plot.reserved_proposal_id = None
 
     def list_proposals(self, owner_kind: str, owner_id: str) -> ActionResult:
-        self._require_company(owner_kind, owner_id)
+        self.get_actor(owner_kind, owner_id)
         rows = self.proposals.pending_for(owner_kind, owner_id)
         return ActionResult(
             True,
@@ -1166,12 +1323,19 @@ class World:
 
     def to_public_dict(self) -> dict:
         return {
+            "started": self.started,
             "day": self.day,
             "time_sec": round(self.time_sec, 2),
             "tick_index": self.tick_index,
             "paused": self.paused,
             "player_company_id": self.player_company_id,
             "current_turn": self.current_turn_token(),
+            "config": {
+                "map_size": self.config.map_size,
+                "starting_cities": self.config.starting_cities,
+                "ai_company_count": self.config.ai_company_count,
+                "road_build_cost": self.config.road_build_cost,
+            },
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),
             "proposals": self.proposals.to_public_dict(),

@@ -7,7 +7,25 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div id="app">
+  <div id="setup" class="setup">
+    <form id="setup-form" class="setup-card">
+      <h1>company_sim</h1>
+      <p class="setup-lead">Configure the map, then start. Cities own all plots in their territory; companies start with none.</p>
+      <label>AI companies
+        <input id="setup-companies" type="number" min="0" max="12" value="2" />
+      </label>
+      <label>Agent cities
+        <input id="setup-cities" type="number" min="1" max="8" value="1" />
+      </label>
+      <label>Map size (plots per side)
+        <input id="setup-map" type="number" min="2" max="40" value="12" />
+      </label>
+      <button id="btn-start" type="submit">Start game</button>
+      <p id="setup-error" class="setup-error" hidden></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
     <header>
       <div class="brand">company_sim</div>
       <div id="hud-time" class="hud">day 1</div>
@@ -21,13 +39,31 @@
         <h2>Selected</h2>
         <pre id="selected">Click a plot</pre>
         <div class="row">
-          <button id="btn-buy" type="button" disabled>Buy plot</button>
-          <button id="btn-build" type="button" disabled>Build foundry</button>
+          <button id="btn-plot-buy" type="button" disabled>Propose buy plot</button>
+          <button id="btn-plot-sell" type="button" disabled>Propose sell plot</button>
         </div>
         <div class="row">
+          <button id="btn-build" type="button" disabled>Build foundry</button>
           <button id="btn-produce" type="button" disabled>Produce</button>
+        </div>
+        <div class="row">
+          <label class="inline">Road side
+            <select id="road-side">
+              <option value="N">N</option>
+              <option value="E">E</option>
+              <option value="S">S</option>
+              <option value="W">W</option>
+            </select>
+          </label>
           <button id="btn-road" type="button" disabled>Build road</button>
-          <button id="btn-merge" type="button" disabled>Merge with last</button>
+          <button id="btn-merge" type="button" disabled>Combine</button>
+        </div>
+        <h2>Proposals</h2>
+        <pre id="proposals">—</pre>
+        <div class="row">
+          <input id="proposal-id" type="number" min="1" placeholder="#" style="width:4rem" />
+          <button id="btn-accept" type="button">Accept</button>
+          <button id="btn-reject" type="button">Reject</button>
         </div>
         <h2>Inventory</h2>
         <pre id="inventory">—</pre>
@@ -46,8 +82,8 @@
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
         <p class="hint">
-          1 city + 2 AI companies + you. One day when all companies act.
-          Soft tint = city territory. Gold-brown = municipal plots.
+          Roads are edges on owned plots (N/E/S/W). Combine adjacent owned plots only with no road between.
+          Plot buy/sell are direct proposals — accept or reject.
         </p>
       </aside>
     </main>

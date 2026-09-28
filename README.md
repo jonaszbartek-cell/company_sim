@@ -2,7 +2,7 @@
 
 Company economic simulator (Python + Web UI) with local LLM rivals.
 
-**Now:** 1 player + 2 AI companies + 1 city agent. Day-based turns, indexed market, text-file saves for LLM context.
+**Now:** Setup screen (AI companies, cities, map size). Cities own all plots at start; companies buy land via direct proposals. Edge roads + combine flags. Day turns, market, text saves.
 
 ## Docs
 
@@ -20,7 +20,7 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m company_sim --no-browser
 ```
 
-Open http://127.0.0.1:8765/
+Open http://127.0.0.1:8765/ — choose companies / cities / map size, then Start.
 
 ### Optional local LLM
 
@@ -32,17 +32,19 @@ PYTHONPATH=src python -m company_sim
 
 ### What works now
 
-- Agent base → Company / City
-- Day advances when all companies have acted (slowable AI turns)
-- Market: post sell/buy, buy lowest-price listings
-- Produce action on foundries (iron+coal+energy → steel)
-- Text saves under `saves/` (world, market, per-agent, pairwise mailboxes) for LLM context
-- Sequential LLM/heuristic engine: one agent, then the next
-- Mail: AGENT↔AGENT and AGENT↔USER via `send_message` / player UI
+- Setup: AI company count, city count, plots-per-side; files created on start
+- Cities own all territory plots; companies start with none
+- Edge roads (N/E/S/W on owned plots); combine flags (no road between)
+- Plot buy/sell as direct proposals with accept/reject
+- Goods propose_sell / propose_buy with accept/reject
+- Market (companies only) + city government contracts
+- Day advances when all companies have acted
+- Text saves under `saves/` for LLM context
 
 ### Controls
 
-- Click plot → Buy / Build / Produce / Road / Merge
+- Propose buy/sell plot → Accept / Reject proposals
+- Build / Produce / Road (pick side) / Combine
 - Market: Buy 1 iron / Sell 1 steel
 - Mail: pick contact → send message
 - Pass day / Pause

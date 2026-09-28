@@ -157,4 +157,4 @@ def test_proposals_file_saved():
         w.propose_sell("company", "ai_1", "player", "steel", 1, 40)
         text = (root / "proposals.txt").read_text(encoding="utf-8")
         assert "=== DIRECT PROPOSALS ===" in text
-        assert "sell 1x steel" in text
+        assert "goods_sell 1x steel" in text

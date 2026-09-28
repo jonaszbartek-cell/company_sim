@@ -101,6 +101,9 @@ def test_action_updates_correct_files():
         w = _world(root)
         player = w.companies["player"]
         cash_before = player.cash
+        tile = w.grid.get(1, 1)
+        assert tile.plot
+        tile.plot.claim("company", "player")
         owned = w.owned_plots("company", "player")
         t = owned[0]
 

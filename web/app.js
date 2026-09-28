@@ -1,3 +1,7 @@
+const setupEl = document.getElementById("setup");
+const setupForm = document.getElementById("setup-form");
+const setupError = document.getElementById("setup-error");
+const appEl = document.getElementById("app");
 const canvas = document.getElementById("map");
 const ctx = canvas.getContext("2d");
 const hudTime = document.getElementById("hud-time");
@@ -5,17 +9,23 @@ const hudCash = document.getElementById("hud-cash");
 const selectedEl = document.getElementById("selected");
 const inventoryEl = document.getElementById("inventory");
 const marketEl = document.getElementById("market");
+const proposalsEl = document.getElementById("proposals");
 const aiLog = document.getElementById("ai-log");
 const aiMode = document.getElementById("ai-mode");
 const btnPause = document.getElementById("btn-pause");
 const btnPass = document.getElementById("btn-pass");
-const btnBuy = document.getElementById("btn-buy");
+const btnPlotBuy = document.getElementById("btn-plot-buy");
+const btnPlotSell = document.getElementById("btn-plot-sell");
 const btnBuild = document.getElementById("btn-build");
 const btnProduce = document.getElementById("btn-produce");
 const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
+const roadSide = document.getElementById("road-side");
 const btnMktBuyIron = document.getElementById("btn-mkt-buy-iron");
 const btnMktSellSteel = document.getElementById("btn-mkt-sell-steel");
+const btnAccept = document.getElementById("btn-accept");
+const btnReject = document.getElementById("btn-reject");
+const proposalIdInput = document.getElementById("proposal-id");
 const mailTo = document.getElementById("mail-to");
 const mailBody = document.getElementById("mail-body");
 const mailLog = document.getElementById("mail-log");
@@ -25,8 +35,28 @@ let state = null;
 let selected = null;
 let lastOwnedClick = null;
 let cellSize = 20;
+let started = false;
+
+function showGame() {
+  started = true;
+  setupEl.hidden = true;
+  appEl.hidden = false;
+  resize();
+}
+
+function showSetup(defaults) {
+  started = false;
+  setupEl.hidden = false;
+  appEl.hidden = true;
+  if (defaults) {
+    if (defaults.ai_companies != null) document.getElementById("setup-companies").value = defaults.ai_companies;
+    if (defaults.cities != null) document.getElementById("setup-cities").value = defaults.cities;
+    if (defaults.map_size != null) document.getElementById("setup-map").value = defaults.map_size;
+  }
+}
 
 function resize() {
+  if (appEl.hidden) return;
   const rect = canvas.parentElement.getBoundingClientRect();
   canvas.width = Math.floor(rect.width);
   canvas.height = Math.floor(rect.height);
@@ -43,8 +73,39 @@ function isPlayerOwned(plot) {
   return plot && plot.owner_kind === "company" && plot.owner_id === state.player_company_id;
 }
 
+function drawEdgeRoad(px, py, side, size) {
+  const t = Math.max(2, Math.floor(size * 0.12));
+  ctx.fillStyle = "#8a949e";
+  if (side === "N") ctx.fillRect(px + 1, py + 1, size - 2, t);
+  if (side === "S") ctx.fillRect(px + 1, py + size - 1 - t, size - 2, t);
+  if (side === "W") ctx.fillRect(px + 1, py + 1, t, size - 2);
+  if (side === "E") ctx.fillRect(px + size - 1 - t, py + 1, t, size - 2);
+}
+
+function drawCombineMark(px, py, side, size) {
+  ctx.strokeStyle = "rgba(125, 209, 255, 0.85)";
+  ctx.lineWidth = 2;
+  const m = Math.floor(size * 0.28);
+  ctx.beginPath();
+  if (side === "N") {
+    ctx.moveTo(px + m, py + 2);
+    ctx.lineTo(px + size - m, py + 2);
+  } else if (side === "S") {
+    ctx.moveTo(px + m, py + size - 2);
+    ctx.lineTo(px + size - m, py + size - 2);
+  } else if (side === "W") {
+    ctx.moveTo(px + 2, py + m);
+    ctx.lineTo(px + 2, py + size - m);
+  } else if (side === "E") {
+    ctx.moveTo(px + size - 2, py + m);
+    ctx.lineTo(px + size - 2, py + size - m);
+  }
+  ctx.stroke();
+  ctx.lineWidth = 1;
+}
+
 function draw() {
-  if (!state) return;
+  if (!state || !state.map) return;
   const { width, height } = state.map;
   cellSize = Math.floor(Math.min(canvas.width / width, canvas.height / height));
   const ox = Math.floor((canvas.width - width * cellSize) / 2);
@@ -69,15 +130,14 @@ function draw() {
   for (const t of state.map.tiles) {
     const px = ox + t.x * cellSize;
     const py = oy + t.y * cellSize;
-    if (t.kind === "road") ctx.fillStyle = "#5a6570";
-    else if (t.kind === "plot") {
-      if (t.plot?.building) ctx.fillStyle = "#c47a4a";
-      else if (isPlayerOwned(t.plot)) ctx.fillStyle = "#2f8f6b";
-      else if (t.plot?.owner_kind === "city") ctx.fillStyle = "#7a6a3a";
-      else if (t.plot?.owner_kind === "company") ctx.fillStyle = "#6b3f5a";
-      else if (t.plot?.plot_type === "specialized") ctx.fillStyle = "#4a6b3f";
-      else ctx.fillStyle = "#3f6b4f";
-    } else continue;
+    if (!t.plot) continue;
+
+    if (t.plot.building) ctx.fillStyle = "#c47a4a";
+    else if (isPlayerOwned(t.plot)) ctx.fillStyle = "#2f8f6b";
+    else if (t.plot.owner_kind === "city") ctx.fillStyle = "#7a6a3a";
+    else if (t.plot.owner_kind === "company") ctx.fillStyle = "#6b3f5a";
+    else if (t.plot.plot_type === "specialized") ctx.fillStyle = "#4a6b3f";
+    else ctx.fillStyle = "#3f6b4f";
     ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
 
     if (t.city_id) {
@@ -88,23 +148,33 @@ function draw() {
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
 
-    if (t.plot?.plot_type === "specialized" && !t.plot.building && !t.plot.owner_id) {
+    if (t.plot.plot_type === "specialized" && !t.plot.building) {
       ctx.fillStyle = "rgba(255,220,120,0.35)";
       ctx.fillRect(px + 2, py + 2, 3, 3);
     }
-    if (t.plot?.parcel_size > 1) {
-      ctx.strokeStyle = "rgba(125, 209, 255, 0.7)";
-      ctx.strokeRect(px + 2, py + 2, cellSize - 4, cellSize - 4);
+
+    if (t.plot.roads) {
+      for (const side of ["N", "E", "S", "W"]) {
+        if (t.plot.roads[side]) drawEdgeRoad(px, py, side, cellSize);
+      }
     }
-    if (t.plot?.building) {
+    if (t.plot.combined) {
+      for (const side of Object.keys(t.plot.combined)) {
+        drawCombineMark(px, py, side, cellSize);
+      }
+    }
+    if (t.plot.group_size > 1) {
+      ctx.strokeStyle = "rgba(125, 209, 255, 0.35)";
+      ctx.strokeRect(px + 3, py + 3, cellSize - 6, cellSize - 6);
+    }
+    if (t.plot.reserved_proposal_id) {
+      ctx.fillStyle = "rgba(240, 180, 60, 0.35)";
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    }
+    if (t.plot.building) {
       ctx.fillStyle = "#1a1008";
       ctx.font = `${Math.max(9, cellSize * 0.4)}px sans-serif`;
       ctx.fillText(t.plot.owner_kind === "city" ? "M" : "B", px + 3, py + cellSize - 3);
-      const p = t.plot.building.progress || 0;
-      ctx.fillStyle = "rgba(0,0,0,0.45)";
-      ctx.fillRect(px + 2, py + 2, cellSize - 4, 3);
-      ctx.fillStyle = "#7ad1ff";
-      ctx.fillRect(px + 2, py + 2, (cellSize - 4) * p, 3);
     }
   }
 
@@ -143,13 +213,27 @@ function refreshPanels() {
       ? sells.map((L) => `#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
       : "(no sell listings)";
   }
+  if (state.proposals) {
+    const props = state.proposals.proposals || [];
+    proposalsEl.textContent = props.length
+      ? props
+          .map((p) => {
+            if (p.proposal_type?.startsWith("plot_")) {
+              return `#${p.id} ${p.proposal_type} (${p.plot_x},${p.plot_y}) @${p.price} ${p.from}→${p.to}`;
+            }
+            return `#${p.id} ${p.proposal_type || p.side} ${p.quantity}x ${p.item_id} @${p.price} ${p.from}→${p.to}`;
+          })
+          .join("\n")
+      : "(none)";
+  }
   refreshMailContacts();
   refreshMailLog();
   btnPause.textContent = state.paused ? "Resume" : "Pause";
 
   if (!selected) {
-    selectedEl.textContent = "Click a plot / road candidate";
-    btnBuy.disabled = true;
+    selectedEl.textContent = "Click a plot";
+    btnPlotBuy.disabled = true;
+    btnPlotSell.disabled = true;
     btnBuild.disabled = true;
     btnProduce.disabled = true;
     btnRoad.disabled = true;
@@ -158,16 +242,19 @@ function refreshPanels() {
   }
   const t = tileAt(selected.x, selected.y);
   selectedEl.textContent = JSON.stringify({ x: selected.x, y: selected.y, tile: t }, null, 2);
-  const canBuy = t && t.kind === "plot" && t.plot && !t.plot.owner_id;
-  const canBuild = t && t.kind === "plot" && isPlayerOwned(t.plot) && !t.plot.building;
-  const canProduce = t && t.kind === "plot" && isPlayerOwned(t.plot) && t.plot.building;
-  const canRoad = t && ((t.kind === "plot" && t.plot && !t.plot.owner_id) || t.kind === "empty");
+  const canBuy =
+    t && t.plot && t.plot.owner_id && !isPlayerOwned(t.plot) && !t.plot.reserved_proposal_id;
+  const canSell = t && isPlayerOwned(t.plot) && !t.plot.reserved_proposal_id;
+  const canBuild = t && isPlayerOwned(t.plot) && !t.plot.building && !t.plot.reserved_proposal_id;
+  const canProduce = t && isPlayerOwned(t.plot) && t.plot.building;
+  const canRoad = t && isPlayerOwned(t.plot);
   let canMerge = false;
   if (lastOwnedClick && t && isPlayerOwned(t.plot) && !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)) {
     const dist = Math.abs(lastOwnedClick.x - selected.x) + Math.abs(lastOwnedClick.y - selected.y);
     canMerge = dist === 1;
   }
-  btnBuy.disabled = !canBuy;
+  btnPlotBuy.disabled = !canBuy;
+  btnPlotSell.disabled = !canSell;
   btnBuild.disabled = !canBuild;
   btnProduce.disabled = !canProduce;
   btnRoad.disabled = !canRoad;
@@ -175,12 +262,46 @@ function refreshPanels() {
 }
 
 function applyPayload(payload) {
-  if (payload.state) state = payload.state;
+  if (payload.type === "setup" || payload.started === false) {
+    if (!started) showSetup(payload.defaults || payload);
+    return;
+  }
+  if (payload.state) {
+    state = payload.state;
+    if (!started) showGame();
+  }
   if (payload.ai) aiLog.textContent = payload.ai;
   if (payload.ai_mode) aiMode.textContent = `mode: ${payload.ai_mode}`;
+  if (started) {
+    refreshPanels();
+    draw();
+  }
+}
+
+setupForm.addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  setupError.hidden = true;
+  const body = {
+    ai_companies: Number(document.getElementById("setup-companies").value),
+    cities: Number(document.getElementById("setup-cities").value),
+    map_size: Number(document.getElementById("setup-map").value),
+  };
+  const res = await fetch("/api/setup", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data = await res.json();
+  if (!data.ok) {
+    setupError.textContent = data.message || "Setup failed";
+    setupError.hidden = false;
+    return;
+  }
+  state = data.state;
+  showGame();
   refreshPanels();
   draw();
-}
+});
 
 canvas.addEventListener("click", (ev) => {
   if (!state) return;
@@ -215,12 +336,32 @@ btnPause.addEventListener("click", async () => {
   });
 });
 
-btnBuy.addEventListener("click", async () => {
+btnPlotBuy.addEventListener("click", async () => {
   if (!selected) return;
-  const res = await fetch("/api/player/buy_plot", {
+  const t = tileAt(selected.x, selected.y);
+  if (!t?.plot?.owner_id) return;
+  const price = Number(prompt("Offer price for this plot?", String(t.plot.value || 100)));
+  if (!Number.isFinite(price) || price < 0) return;
+  const to = `${t.plot.owner_kind}:${t.plot.owner_id}`;
+  const res = await fetch("/api/player/propose_plot_buy", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(selected),
+    body: JSON.stringify({ to, x: selected.x, y: selected.y, price }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnPlotSell.addEventListener("click", async () => {
+  if (!selected) return;
+  const to = prompt("Sell to (e.g. city:city_a or ai_1)", "city:city_a");
+  if (!to) return;
+  const price = Number(prompt("Ask price?", "150"));
+  if (!Number.isFinite(price) || price < 0) return;
+  const res = await fetch("/api/player/propose_plot_sell", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ to, x: selected.x, y: selected.y, price }),
   });
   const data = await res.json();
   if (!data.ok) alert(data.message);
@@ -242,7 +383,7 @@ btnRoad.addEventListener("click", async () => {
   const res = await fetch("/api/player/build_road", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(selected),
+    body: JSON.stringify({ ...selected, side: roadSide.value }),
   });
   const data = await res.json();
   if (!data.ok) alert(data.message);
@@ -278,6 +419,30 @@ btnProduce.addEventListener("click", async () => {
 
 btnPass.addEventListener("click", async () => {
   const res = await fetch("/api/player/pass", { method: "POST" });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnAccept.addEventListener("click", async () => {
+  const proposal_id = Number(proposalIdInput.value);
+  if (!proposal_id) return;
+  const res = await fetch("/api/player/accept_proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id }),
+  });
+  const data = await res.json();
+  if (!data.ok) alert(data.message);
+});
+
+btnReject.addEventListener("click", async () => {
+  const proposal_id = Number(proposalIdInput.value);
+  if (!proposal_id) return;
+  const res = await fetch("/api/player/reject_proposal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ proposal_id }),
+  });
   const data = await res.json();
   if (!data.ok) alert(data.message);
 });
@@ -366,5 +531,22 @@ function connect() {
   }, 15000);
 }
 
-resize();
-connect();
+async function boot() {
+  try {
+    const res = await fetch("/api/state");
+    const data = await res.json();
+    if (data.started && data.state) {
+      state = data.state;
+      showGame();
+      refreshPanels();
+      draw();
+    } else {
+      showSetup(data.defaults);
+    }
+  } catch {
+    showSetup();
+  }
+  connect();
+}
+
+boot();

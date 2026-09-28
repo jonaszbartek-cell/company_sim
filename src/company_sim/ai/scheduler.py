@@ -163,20 +163,35 @@ class AIScheduler:
         else:
             self._heuristic_company(world, actor)
 
-    def _road_candidates_near(self, world: World, cx: int, cy: int, radius: int) -> list[tuple[int, int]]:
-        candidates: list[tuple[int, int]] = []
-        for tile in world.grid.tiles:
-            if abs(tile.x - cx) + abs(tile.y - cy) > radius:
+    def _edge_road_candidates(self, world: World, kind: str, actor_id: str) -> list[tuple[int, int, str]]:
+        """Owned plots missing an edge road (prefer sides facing another owned plot)."""
+        out: list[tuple[int, int, str]] = []
+        for t in world.owned_plots(kind, actor_id):
+            if not t.plot:
                 continue
-            if tile.kind.value == "empty":
-                if any(world.grid.get(nx, ny).kind.value == "road" for nx, ny in world.grid.neighbors4(tile.x, tile.y)):
-                    candidates.append((tile.x, tile.y))
-            elif tile.kind.value == "plot" and tile.plot and tile.plot.owner_id is None:
-                if any(world.grid.get(nx, ny).kind.value == "road" for nx, ny in world.grid.neighbors4(tile.x, tile.y)):
-                    candidates.append((tile.x, tile.y))
-        return candidates
+            for side in ("N", "E", "S", "W"):
+                if t.plot.roads.get(side) or t.plot.combined.get(side):
+                    continue
+                out.append((t.x, t.y, side))
+        return out
 
     def _heuristic_city(self, world: World, city: City) -> None:
+        # Respond to pending plot proposals addressed to this city
+        for prop in world.proposals.pending_for("city", city.id):
+            if not (prop.to_kind == "city" and prop.to_id == city.id):
+                continue
+            try:
+                if prop.proposal_type == "plot_buy" and prop.price >= 80:
+                    world.accept_proposal("city", city.id, prop.id)
+                    self.last_thought = f"{city.name}: accepted plot proposal #{prop.id}"
+                    return
+                world.reject_proposal("city", city.id, prop.id)
+                self.last_thought = f"{city.name}: rejected proposal #{prop.id}"
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.last_thought = f"{city.name}: proposal handling failed ({exc})"
+                return
+
         # Award any open contract that already has bids
         for c in world.gov_contracts.open_contracts():
             if c.city_id == city.id and c.bids:
@@ -205,7 +220,7 @@ class AIScheduler:
 
         owned = world.owned_plots("city", city.id)
         for t in owned:
-            if t.plot and t.plot.building is None and city.cash >= 200:
+            if t.plot and t.plot.building is None and city.cash >= 200 and t.plot.reserved_proposal_id is None:
                 try:
                     world.build_building("city", city.id, t.x, t.y)
                     self.last_thought = f"{city.name}: built foundry at ({t.x},{t.y})"
@@ -214,28 +229,12 @@ class AIScheduler:
                     self.last_thought = f"{city.name}: build failed ({exc})"
                     return
 
-        for t in world.grid.tiles:
-            if (
-                t.kind.value == "plot"
-                and t.plot
-                and t.plot.owner_id is None
-                and t.city_id == city.id
-                and city.cash >= t.plot.price
-            ):
-                try:
-                    world.buy_plot("city", city.id, t.x, t.y)
-                    self.last_thought = f"{city.name}: claimed plot ({t.x},{t.y})"
-                    return
-                except Exception as exc:  # noqa: BLE001
-                    self.last_thought = f"{city.name}: claim failed ({exc})"
-                    return
-
-        candidates = self._road_candidates_near(world, city.center_x, city.center_y, radius=8)
+        candidates = self._edge_road_candidates(world, "city", city.id)
         if candidates and city.cash >= world.config.road_build_cost:
-            x, y = candidates[0]
+            x, y, side = candidates[0]
             try:
-                world.city_build_road(city.id, x, y)
-                self.last_thought = f"{city.name}: built road at ({x},{y})"
+                world.city_build_road(city.id, x, y, side)
+                self.last_thought = f"{city.name}: built {side} road at ({x},{y})"
                 return
             except Exception as exc:  # noqa: BLE001
                 self.last_thought = f"{city.name}: road failed ({exc})"
@@ -245,6 +244,26 @@ class AIScheduler:
 
     def _heuristic_company(self, world: World, company: Actor) -> None:
         owned = world.owned_plots("company", company.id)
+
+        # Accept/reject pending proposals addressed to this company
+        for prop in world.proposals.pending_for("company", company.id):
+            if not (prop.to_kind == "company" and prop.to_id == company.id):
+                continue
+            try:
+                if prop.proposal_type in ("goods_sell", "plot_sell"):
+                    if company.cash >= prop.total:
+                        world.accept_proposal("company", company.id, prop.id)
+                        self.last_thought = f"{company.name}: accepted #{prop.id}"
+                        return
+                elif prop.proposal_type in ("goods_buy", "plot_buy"):
+                    world.accept_proposal("company", company.id, prop.id)
+                    self.last_thought = f"{company.name}: accepted #{prop.id}"
+                    return
+                world.reject_proposal("company", company.id, prop.id)
+                self.last_thought = f"{company.name}: rejected #{prop.id}"
+                return
+            except Exception:
+                continue
 
         # Fulfill awarded government contracts if possible
         for c in world.gov_contracts.awarded_for_company(company.id):
@@ -334,7 +353,7 @@ class AIScheduler:
 
         # Build on empty owned plot
         for t in owned:
-            if t.plot and t.plot.building is None and company.cash >= 200:
+            if t.plot and t.plot.building is None and company.cash >= 200 and t.plot.reserved_proposal_id is None:
                 try:
                     world.build_building("company", company.id, t.x, t.y)
                     self.last_thought = f"{company.name}: built foundry at ({t.x},{t.y})"
@@ -343,24 +362,34 @@ class AIScheduler:
                     self.last_thought = f"{company.name}: build failed ({exc})"
                     return
 
+        # No land yet — offer to buy a cheap city plot
         if not owned:
-            unowned = [
+            city_plots = [
                 t
                 for t in world.grid.tiles
-                if t.kind.value == "plot"
-                and t.plot
-                and t.plot.owner_id is None
-                and t.plot.price <= company.cash
+                if t.plot
+                and t.plot.owner_kind == "city"
+                and t.plot.reserved_proposal_id is None
+                and t.plot.value <= company.cash
             ]
-            unowned.sort(key=lambda t: t.plot.price)  # type: ignore[union-attr]
-            if unowned:
-                t = unowned[0]
+            city_plots.sort(key=lambda t: t.plot.value)  # type: ignore[union-attr]
+            if city_plots:
+                t = city_plots[0]
+                assert t.plot is not None
+                price = t.plot.value
                 try:
-                    world.buy_plot("company", company.id, t.x, t.y)
-                    self.last_thought = f"{company.name}: bought at ({t.x},{t.y})"
+                    world.propose_plot_buy(
+                        "company",
+                        company.id,
+                        f"city:{t.plot.owner_id}",
+                        t.x,
+                        t.y,
+                        price,
+                    )
+                    self.last_thought = f"{company.name}: offered {price} for ({t.x},{t.y})"
                     return
                 except Exception as exc:  # noqa: BLE001
-                    self.last_thought = f"{company.name}: buy failed ({exc})"
+                    self.last_thought = f"{company.name}: plot buy failed ({exc})"
                     return
 
         self.last_thought = f"{company.name}: holding (day {world.day})"
