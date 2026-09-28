@@ -15,7 +15,8 @@ from company_sim.world import World, WorldConfig
 def test_catalog_loads_full_economy():
     c = GameContent.load()
     assert len(c.items.all()) >= 40
-    assert len(c.buildings.all()) >= 13
+    assert len(c.buildings.all()) >= 14
+    assert "city_hall" in {b.id for b in c.buildings.all()}
     assert len(c.production.all()) >= 40
     assert "iron" not in c.goods_index
     assert "iron_ore" in c.goods_index

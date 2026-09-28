@@ -73,10 +73,19 @@ def test_extremely_big_map_build_road_produce_merge():
         player.inventory.set("coal", 5)
         player.inventory.set("energy", 5)
 
-        # Mid-map empty land
-        x, y = 50, 50
+        # Mid-map empty land (skip City Hall at territory center)
+        x = y = None
+        for cand_x, cand_y in ((50, 50), (51, 50), (50, 51), (49, 50), (52, 52)):
+            tile = w.grid.get(cand_x, cand_y)
+            if (
+                tile.plot
+                and tile.plot.owner_kind == "city"
+                and tile.plot.building is None
+            ):
+                x, y = cand_x, cand_y
+                break
+        assert x is not None and y is not None
         tile = w.grid.get(x, y)
-        assert tile.plot and tile.plot.owner_kind == "city"
         tile.plot.claim("company", "player")
         built = w.build_building("company", "player", x, y, "foundry")
         assert built.ok, built.message
@@ -92,7 +101,9 @@ def test_extremely_big_map_build_road_produce_merge():
 
         # Expand footprint onto neighbor (still a rectangle)
         nx, ny = x + 1, y
-        w.grid.get(nx, ny).plot.claim("company", "player")
+        neighbor = w.grid.get(nx, ny).plot
+        assert neighbor and neighbor.building is None
+        neighbor.claim("company", "player")
         player.acted_this_day = False
         merged = w.merge_plots("company", "player", x, y, nx, ny)
         assert merged.ok, merged.message

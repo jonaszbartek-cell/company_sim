@@ -35,6 +35,8 @@ class BuildingDefinition:
     )
     # Mine / Rig: production method chosen at build and cannot change later
     locks_production_method: bool = False
+    # False for City Hall — engine places at game start; build_building rejects
+    buildable: bool = True
 
     def allows_plot_type(self, plot_type: object) -> bool:
         value = str(getattr(plot_type, "value", plot_type))
@@ -58,6 +60,7 @@ class BuildingDefinition:
             "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
             "locks_production_method": bool(self.locks_production_method),
+            "buildable": bool(self.buildable),
             "art": {
                 "map": f"/static/assets/buildings/map/{self.id}/1x1.svg",
                 "ui": f"/static/assets/buildings/ui/{self.id}.svg",
@@ -190,6 +193,7 @@ class BuildingCatalog:
                 build_cost_items=cost_items,
                 allowed_plot_types=allowed,
                 locks_production_method=bool(row.get("locks_production_method", False)),
+                buildable=bool(row.get("buildable", True)),
             )
             if bdef.id in buildings:
                 raise ValueError(f"Duplicate building id in {path}: {bdef.id}")
