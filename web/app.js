@@ -349,6 +349,14 @@ function refreshContentSelects() {
   if (!state || !state.content) return;
   const buildings = state.content.buildings || [];
   const methods = state.content.production_methods || state.content.production || [];
+  const methodHint = document.getElementById("method-hint");
+  const selectedTile = selected ? tileAt(selected.x, selected.y) : null;
+  const existing = selectedTile?.plot?.building || null;
+
+  // When a built plot is selected, drive method list from that building;
+  // otherwise from the build picker target.
+  const focusBuildingId = existing?.building_id || buildId.value;
+
   if (buildings.length) {
     const prev = buildId.value;
     buildId.innerHTML = buildings
@@ -361,8 +369,9 @@ function refreshContentSelects() {
         .map((b) => {
           const src = buildingArt(b.id, "ui");
           const active = b.id === buildId.value ? "active" : "";
+          const lock = b.locks_production_method ? " · locks method" : "";
           return (
-            `<button type="button" data-building-id="${b.id}" class="${active}" title="${b.name || b.id}">` +
+            `<button type="button" data-building-id="${b.id}" class="${active}" title="${b.name || b.id}${lock}">` +
             `<img src="${src}" alt="${b.id}" />` +
             `<span>${b.id.replaceAll("_", " ")}</span></button>`
           );
@@ -379,15 +388,31 @@ function refreshContentSelects() {
   }
   if (methods.length) {
     const prev = methodId.value;
-    // Prefer methods for currently selected building type when possible
-    const forBuilding = buildId.value
-      ? methods.filter((m) => m.building_id === buildId.value)
+    const forBuilding = focusBuildingId
+      ? methods.filter((m) => m.building_id === focusBuildingId)
       : methods;
     const list = forBuilding.length ? forBuilding : methods;
     methodId.innerHTML = list
       .map((m) => `<option value="${m.id}">${m.id}</option>`)
       .join("");
-    if (prev && [...methodId.options].some((o) => o.value === prev)) methodId.value = prev;
+    if (existing?.production_method_id && [...methodId.options].some((o) => o.value === existing.production_method_id)) {
+      methodId.value = existing.production_method_id;
+    } else if (prev && [...methodId.options].some((o) => o.value === prev)) {
+      methodId.value = prev;
+    }
+  }
+  if (methodHint) {
+    if (existing?.production_method_locked) {
+      methodHint.textContent = `Method locked at build (${existing.production_method_id}) — Mine/Rig cannot change it.`;
+    } else if (existing) {
+      methodHint.textContent = `Current method: ${existing.production_method_id || "—"}. Change anytime with Change method.`;
+    } else {
+      const bdef = (state.content.buildings || []).find((b) => b.id === buildId.value);
+      const locks = bdef?.locks_production_method;
+      methodHint.textContent = locks
+        ? "Choose method, then Build with method — this building locks the method after construct."
+        : "Choose method, then Build with method — you can change it anytime later.";
+    }
   }
 }
 
@@ -521,6 +546,7 @@ function refreshPanels() {
   btnSetMethod.disabled = !canSetMethod;
   btnRoad.disabled = !canRoad;
   btnMerge.disabled = !canMerge;
+  refreshContentSelects();
 }
 
 function applyPayload(payload) {
@@ -621,19 +647,28 @@ btnPlotSell.addEventListener("click", async () => {
 
 btnBuild.addEventListener("click", async () => {
   if (!selected) return;
+  if (!methodId.value) {
+    alert("Choose a production method before building.");
+    return;
+  }
   const data = await api("/api/player/build", {
     ...selected,
     building_id: buildId.value || "foundry",
-    method_id: methodId.value || null,
+    method_id: methodId.value,
   });
   if (!data.ok) alert(data.message);
+  else toolResult.textContent = data.message || "built";
 });
 
 btnSetMethod.addEventListener("click", async () => {
   if (!selected) return;
+  if (!methodId.value) {
+    alert("Choose a production method.");
+    return;
+  }
   const data = await api("/api/player/set_production_method", {
     ...selected,
-    method_id: methodId.value || "make_steel",
+    method_id: methodId.value,
   });
   if (!data.ok) alert(data.message);
   else toolResult.textContent = data.message || "method set";

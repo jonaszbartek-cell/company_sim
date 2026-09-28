@@ -94,8 +94,9 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "function": {
             "name": "build_building",
             "description": (
-                "Build on a plot you own. Mine needs specialized_mine; Rig needs "
-                "specialized_well. For mine/rig pass method_id at build (locked after)."
+                "Build on a plot you own. Always pass method_id to choose the production "
+                "method at build time. Mine → specialized_mine; Rig → specialized_well "
+                "(those methods lock after build). Other buildings keep a changeable method."
             ),
             "parameters": {
                 "type": "object",
@@ -105,7 +106,10 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
                     "building_id": {"type": "string"},
                     "method_id": {
                         "type": "string",
-                        "description": "Production method (required choice for mine/rig; locked after build)",
+                        "description": (
+                            "Production method to start with (e.g. make_steel, extract_oil). "
+                            "Prefer always setting this when building."
+                        ),
                     },
                 },
                 "required": ["x", "y"],
@@ -179,7 +183,11 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "set_production_method",
-            "description": "Choose which production method a building runs.",
+            "description": (
+                "Change a building's production method when it is not locked. "
+                "Works anytime for normal factories. Mine/Rig methods are locked at build "
+                "and cannot be changed — rebuild or destroy if you need another method."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -622,7 +630,12 @@ def build_actor_context(world: World, actor: Actor) -> str:
     for t in owned[:12]:
         b = "none"
         if t.plot and t.plot.building:
-            b = f"{t.plot.building.building_id}/{t.plot.building.status}"
+            bb = t.plot.building
+            locked = "locked" if bb.production_method_locked else "changeable"
+            b = (
+                f"{bb.building_id}/{bb.status}"
+                f" method={bb.production_method_id or '-'}({locked})"
+            )
         ptype = t.plot.plot_type.value if t.plot else "?"
         owned_lines.append(f"  ({t.x},{t.y}) {ptype} building={b}")
     if len(owned) > 12:
@@ -649,7 +662,9 @@ def build_actor_context(world: World, actor: Actor) -> str:
             if actor.kind == "city"
             else (
                 "Companies with no land: list_plots_for_sale then ONE propose_plot_buy then done. "
-                "Empty owned plot: build_building then done. "
+                "Empty owned plot: build_building(x,y,building_id,method_id=…) then done "
+                "(always choose method_id at build; change later with set_production_method "
+                "only if the building method is not locked). "
                 "Otherwise: get_status → act → done. "
             )
         )
@@ -676,7 +691,9 @@ def system_prompt_for(actor: Actor) -> str:
         base
         + "You run a company. Goal: strongest firm. "
         "Buy land with propose_plot_buy (cities own plots at start) — one plot offer per turn is enough, then done. "
-        "After you own a plot: build_building, set_production_method, deposit_to_building, produce, withdraw, trade. "
+        "When building, always pass method_id (production method choice at construct). "
+        "Use set_production_method anytime on unlocked buildings; Mine/Rig methods lock at build. "
+        "Then deposit_to_building, produce, withdraw, trade. "
         "Use propose_sell/propose_buy for direct goods deals. "
         "Accept or reject pending proposals addressed to you (list_proposals). "
         "Build roads with build_road (side N/E/S/W, costs 1 steel)."
