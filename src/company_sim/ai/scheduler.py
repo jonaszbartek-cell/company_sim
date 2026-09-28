@@ -119,27 +119,29 @@ class AIScheduler:
             self.busy = False
 
     def _run_llm_session(self, world: World, actor: Actor) -> str:
-        # Compact context: small local models ignore tools when the prompt is huge.
-        world.persistence.save_all(world)
-        agent_txt = world.persistence.agent_path(actor.id).read_text(encoding="utf-8")
-        mine = world.proposals.pending_for(actor.kind, actor.id)
-        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
-        if mine:
-            mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
-        else:
-            mine_txt += "(none)\n"
-        gov_path = world.persistence.root / "government_contracts.txt"
-        gov_txt = gov_path.read_text(encoding="utf-8")[:2500] if gov_path.exists() else ""
-        file_bundle = f"{agent_txt}\n{mine_txt}\n{gov_txt}\n"
+        """
+        Pack *this* actor's files into the prompt, run tools, optionally write a debug trace.
+
+        The LLM never opens the filesystem. Isolation = host only reads this actor's
+        instruction + private agent file (+ shared boards / their mail). Next turn
+        rebuilds the prompt for the next actor from scratch.
+        """
+        from company_sim.agent_files import AgentFileStore
+
+        if world.file_store is None:
+            world.file_store = AgentFileStore(world.persistence.root)
+        bundle = world.file_store.pack_for_agent(world, actor, compact=True)
         executor = ToolExecutor(world, actor)
         system = system_prompt_for(actor)
         user = (
-            file_bundle
+            bundle.prompt_text
             + "\n"
             + build_actor_context(world, actor)
             + "\nNOW: call tools only. Start with get_status or list_plots_for_sale, then act, then done."
         )
         messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
+        rounds: list[dict[str, Any]] = []
+        final_note = f"{actor.name} [LLM]: max rounds reached"
 
         for _ in range(self.llm.config.max_tool_rounds):
             resp = self.llm.chat(
@@ -151,26 +153,70 @@ class AIScheduler:
             msg = resp.message
             messages.append(msg)
             tool_calls = parse_tool_calls(msg)
+            round_rec: dict[str, Any] = {
+                "assistant_content": (msg.get("content") or "").strip(),
+                "tool_calls": [],
+                "tool_results": [],
+            }
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
-                return f"{actor.name} [LLM]: {content or 'no tool calls'}"
+                final_note = f"{actor.name} [LLM]: {content or 'no tool calls'}"
+                rounds.append(round_rec)
+                self._write_debug(world, actor, system, bundle, rounds, final_note)
+                return final_note
 
+            done = False
             for name, args, call_id in tool_calls:
+                round_rec["tool_calls"].append({"name": name, "arguments": args})
                 result = executor.execute(name, args)
+                round_rec["tool_results"].append(f"{name} → {result}")
                 tool_msg: dict[str, Any] = {
                     "role": "tool",
                     "content": str(result),
+                    "name": name,
                 }
                 if call_id:
                     tool_msg["tool_call_id"] = call_id
-                tool_msg["name"] = name
                 messages.append(tool_msg)
                 if name == "done":
-                    return f"{actor.name} [LLM]: {executor.done_note or 'done'} | {'; '.join(executor.log)}"
+                    done = True
+            rounds.append(round_rec)
+            if done:
+                final_note = (
+                    f"{actor.name} [LLM]: {executor.done_note or 'done'} | "
+                    f"{'; '.join(executor.log)}"
+                )
+                self._write_debug(world, actor, system, bundle, rounds, final_note)
+                return final_note
 
         if executor.log:
-            return f"{actor.name} [LLM]: {'; '.join(executor.log)}"
-        return f"{actor.name} [LLM]: max rounds reached"
+            final_note = f"{actor.name} [LLM]: {'; '.join(executor.log)}"
+        self._write_debug(world, actor, system, bundle, rounds, final_note)
+        return final_note
+
+    def _write_debug(
+        self,
+        world: World,
+        actor: Actor,
+        system: str,
+        bundle: Any,
+        rounds: list[dict[str, Any]],
+        final_note: str,
+    ) -> None:
+        dbg = world.llm_debug_log
+        if dbg is None or not dbg.enabled:
+            return
+        path = dbg.write_turn(
+            actor_kind=actor.kind,
+            actor_id=actor.id,
+            day=world.day,
+            system=system,
+            bundle=bundle,
+            rounds=rounds,
+            final_note=final_note,
+        )
+        if path is not None:
+            log.info("LLM debug trace → %s", path)
 
     def _heuristic(self, world: World, actor: Actor) -> None:
         if actor.kind == "city":

@@ -94,6 +94,30 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
   display: flex; flex-direction: column; gap: 0.35rem;
   font-size: 0.8rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em;
 }
+.setup-check {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 0.5rem !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+  cursor: pointer;
+}
+.setup-check input { width: auto; }
+#llm-debug-panel select {
+  width: 100%;
+  background: #12171b;
+  color: var(--text);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: 4px;
+  padding: 0.35rem;
+  margin: 0.35rem 0;
+}
+#llm-debug-trace {
+  max-height: 220px;
+  overflow: auto;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+}
 .setup-card input {
   background: #0f151a; color: var(--text);
   border: 1px solid rgba(255,255,255,0.12);
