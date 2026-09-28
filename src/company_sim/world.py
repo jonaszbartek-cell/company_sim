@@ -378,7 +378,7 @@ class World:
         )
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int, side: str) -> ActionResult:
-        """Build a road on one side of an owned square plot."""
+        """Build a road on one side (N/E/S/W) of an owned plot — this plot only."""
         actor = self.get_actor(actor_kind, actor_id)
         side = side.upper()
         if side not in SIDES:

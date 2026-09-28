@@ -41,7 +41,7 @@ A **city is not a special tile**. It is an LLM agent administering territory of 
 | Persist | Text files: world, market, per-agent, **pairwise mailboxes** |
 | Market | Indexed buy/sell listings; sell goods escrowed on market; buy takes lowest price |
 | Map cells | Square **plots only** (no road tiles) |
-| Roads | Built on a **side** (N/E/S/W) of an owned plot; mirrored to neighbor |
+| Roads | Built on a **side** (N/E/S/W) of an owned plot only — neighbor unchanged |
 | Plot combine | Flag only — plots stay; adjacent + no road between; no road on combined side |
 | Plot types | `standard`, `specialized` |
 | Goods | iron, coal, energy, steel + Foundry / make_steel |
@@ -80,7 +80,7 @@ A **city is not a special tile**. It is an LLM agent administering territory of 
 | building | optional Building instance |
 | reserved_proposal_id | lock while a plot proposal is pending |
 
-**Roads:** edges on plots, not separate tiles. Own the plot → choose side → build. Cannot place a road on a combined side.
+**Roads:** edges on plots, not separate tiles. Own the plot → choose side (N/E/S/W) → that plot's edge becomes a road (adjacent plot is unchanged). Cannot place a road on a combined side.
 
 **Combine:** adjacent owned plots with no road between get pairwise flags. Building a road on that shared edge is forbidden.
 

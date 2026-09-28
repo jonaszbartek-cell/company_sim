@@ -9,7 +9,6 @@ from company_sim.actors import City
 from company_sim.items import Inventory
 from company_sim.plots import (
     OPPOSITE,
-    SIDE_DELTA,
     SIDES,
     Plot,
     PlotType,
@@ -76,13 +75,16 @@ class GridMap:
         return bool(tile.plot.roads.get(side))
 
     def shared_edge_has_road(self, x1: int, y1: int, x2: int, y2: int) -> bool:
+        """True if either plot has a road on the shared edge (roads are plot-local)."""
         side = side_between(x1, y1, x2, y2)
         if side is None:
             return False
-        return self.has_road_on_side(x1, y1, side)
+        if self.has_road_on_side(x1, y1, side):
+            return True
+        return self.has_road_on_side(x2, y2, OPPOSITE[side])
 
     def build_edge_road(self, x: int, y: int, side: str) -> None:
-        """Build a road on one side of an owned plot; mirrors onto the neighbor."""
+        """Build a road on one side of this plot only — does not affect the neighbor."""
         if side not in SIDES:
             raise ValueError(f"Invalid side: {side}")
         tile = self.get(x, y)
@@ -93,17 +95,6 @@ class GridMap:
         if tile.plot.roads.get(side):
             raise ValueError("Road already exists on that side")
         tile.plot.roads[side] = True
-        dx, dy = SIDE_DELTA[side]
-        nx, ny = x + dx, y + dy
-        if self.in_bounds(nx, ny):
-            n = self.get(nx, ny)
-            if n.plot:
-                opp = OPPOSITE[side]
-                if n.plot.combined.get(opp):
-                    # Should not happen if combine forbids roads, but keep consistent
-                    tile.plot.roads[side] = False
-                    raise ValueError("Neighbor edge is combined; cannot place road")
-                n.plot.roads[opp] = True
 
     def combine_plots(self, x1: int, y1: int, x2: int, y2: int, owner_kind: str, owner_id: str) -> None:
         """Flag two adjacent plots as combined across their shared edge. Plots stay."""

@@ -38,17 +38,37 @@ def test_cities_own_all_plots_companies_own_none():
         assert min(counts.values()) >= 1
 
 
-def test_edge_road_requires_ownership_and_mirrors():
+def test_edge_road_only_on_this_plot_not_neighbor():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), cities=1, size=4)
         city = next(iter(w.grid.cities.values()))
-        # Take a non-edge cell if possible
         tile = w.grid.get(1, 1)
         assert tile.plot and tile.plot.owned_by("city", city.id)
         w.build_road("city", city.id, 1, 1, "E")
         assert tile.plot.roads["E"] is True
+        # Neighbor is untouched — road is only on this plot's edge
         east = w.grid.get(2, 1)
-        assert east.plot and east.plot.roads["W"] is True
+        assert east.plot and east.plot.roads["W"] is False
+        assert east.plot.roads["E"] is False
+
+
+def test_agent_build_road_tool_chooses_side():
+    """LLM bridge ToolExecutor can build a road with an explicit N/E/S/W side."""
+    from company_sim.ai.tools import ToolExecutor
+
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), cities=1, ai=0, size=4)
+        city = next(iter(w.grid.cities.values()))
+        ex = ToolExecutor(w, city)
+        r = ex.execute("build_road", {"x": 1, "y": 1, "side": "S"})
+        assert r["ok"] is True
+        assert r["data"]["side"] == "S"
+        plot = w.grid.get(1, 1).plot
+        assert plot and plot.roads["S"] is True
+        # Only S on this plot
+        assert plot.roads["N"] is False
+        south = w.grid.get(1, 2).plot
+        assert south and south.roads["N"] is False
 
 
 def test_combine_flags_only_no_disappear_forbids_road_between():

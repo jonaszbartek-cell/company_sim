@@ -368,13 +368,21 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "build_road",
-            "description": "Build an edge road on one side (N/E/S/W) of a plot you own. Forbidden on a combined side.",
+            "description": (
+                "Build a road on ONE side of a plot you own. "
+                "Choose side: N, E, S, or W — only that plot's edge becomes a road "
+                "(the adjacent plot is unchanged). Forbidden on a combined side."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "x": {"type": "integer"},
-                    "y": {"type": "integer"},
-                    "side": {"type": "string", "description": "N, E, S, or W"},
+                    "x": {"type": "integer", "description": "Plot x coordinate"},
+                    "y": {"type": "integer", "description": "Plot y coordinate"},
+                    "side": {
+                        "type": "string",
+                        "enum": ["N", "E", "S", "W"],
+                        "description": "Which edge of THIS plot gets the road: N, E, S, or W",
+                    },
                 },
                 "required": ["x", "y", "side"],
                 "additionalProperties": False,
