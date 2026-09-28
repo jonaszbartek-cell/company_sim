@@ -122,8 +122,11 @@ def test_agents_can_read_full_catalogs():
             "production_methods_catalog.txt",
         ):
             assert (Path(td) / path_name).is_file()
-        bundle = w.file_store.pack_for_agent(w, w.companies["player"], compact=True)
-        text = bundle.prompt_text
+        # Compact LLM pack points at get_catalog; full pack still embeds catalogs
+        compact = w.file_store.pack_for_agent(w, w.companies["player"], compact=True)
+        assert "get_catalog" in compact.prompt_text
+        full = w.file_store.pack_for_agent(w, w.companies["player"], compact=False)
+        text = full.prompt_text
         assert "GOODS INDEX" in text
         assert "BUILDINGS CATALOG" in text
         assert "PRODUCTION METHODS CATALOG" in text

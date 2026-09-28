@@ -61,7 +61,7 @@ def main() -> None:
         c.inventory.set("energy", 5)
 
     # City needs steel for roads / some heuristic paths; cash for ops
-    city = world.cities["city_a"]
+    city = world.grid.cities["city_a"]
     city.cash = max(city.cash, 5_000)
     city.inventory.set("steel", 20)
 
@@ -152,7 +152,7 @@ def main() -> None:
             f"  {cid}: cash={c.cash} plots={len(owned)} buildings={blds} "
             f"inv_keys={list(c.inventory.as_dict())[:8]}"
         )
-    for city_id, city_obj in world.cities.items():
+    for city_id, city_obj in world.grid.cities.items():
         owned = world.owned_plots("city", city_id)
         print(f"  city {city_id}: cash={city_obj.cash} plots={len(owned)}")
     print(f"market listings={len(world.market.listings)}")

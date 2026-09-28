@@ -136,11 +136,34 @@ class AIScheduler:
         system = system_prompt_for(actor)
         tools = tool_definitions_for(actor)
         known_tools = {str(d["function"]["name"]) for d in tools}
+        pending = world.proposals.pending_for(actor.kind, actor.id)
+        if pending:
+            bits = []
+            for p in pending[:4]:
+                bits.append(
+                    f"#{p.id} {p.proposal_type} from {p.from_kind}:{p.from_id} "
+                    f"total={p.total}"
+                )
+            now_hint = (
+                "NOW: pending proposals for you — "
+                + "; ".join(bits)
+                + ". Call accept_proposal(proposal_id=…) for fair offers "
+                "(plot_buy price>=80) or reject_proposal, then done."
+            )
+        elif actor.kind == "company" and not world.owned_plots(actor.kind, actor.id):
+            now_hint = (
+                "NOW: you own no land. Call list_plots_for_sale, then ONE propose_plot_buy, then done."
+            )
+        else:
+            now_hint = (
+                "NOW: call tools only. Start with get_status, take 1-2 useful actions, then done."
+            )
         user = (
             bundle.prompt_text
             + "\n"
             + build_actor_context(world, actor)
-            + "\nNOW: call tools only. Start with get_status or list_plots_for_sale, then act, then done."
+            + "\n"
+            + now_hint
         )
         messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
         rounds: list[dict[str, Any]] = []
