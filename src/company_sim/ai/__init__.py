@@ -2,7 +2,7 @@
 
 from company_sim.ai.llm_client import LLMClient, LLMConfig
 from company_sim.ai.scheduler import AIScheduler
-from company_sim.ai.tools import TOOL_DEFINITIONS, ToolExecutor
+from company_sim.ai.tools import TOOL_DEFINITIONS, ToolExecutor, player_tool_catalog
 
 __all__ = [
     "AIScheduler",
@@ -10,4 +10,5 @@ __all__ = [
     "LLMConfig",
     "TOOL_DEFINITIONS",
     "ToolExecutor",
+    "player_tool_catalog",
 ]

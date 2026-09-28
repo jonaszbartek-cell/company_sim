@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 
 from company_sim.actions import ActionError
 from company_sim.ai.scheduler import AIScheduler
+from company_sim.ai.tools import ToolExecutor, player_tool_catalog
 from company_sim.world import World, WorldConfig
 
 WEB_DIR = Path(__file__).resolve().parents[2] / "web"
@@ -99,6 +100,19 @@ class GovBidBody(BaseModel):
 
 class GovContractIdBody(BaseModel):
     contract_id: int
+
+
+class ProductionMethodBody(BaseModel):
+    x: int
+    y: int
+    method_id: str
+
+
+class PlayerActionBody(BaseModel):
+    """Run any company agent tool by name (same ToolExecutor path as the LLM)."""
+
+    name: str
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 def create_app() -> FastAPI:
@@ -303,6 +317,62 @@ def create_app() -> FastAPI:
         try:
             result = _require_world().produce("company", _player(), body.x, body.y)
             return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.post("/api/player/set_production_method")
+    def set_production_method(body: ProductionMethodBody) -> dict[str, Any]:
+        try:
+            result = _require_world().set_production_method(
+                "company", _player(), body.x, body.y, body.method_id
+            )
+            return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.get("/api/player/tools")
+    def get_player_tools() -> dict[str, Any]:
+        """List every company-agent tool the player can run from the UI."""
+        return {
+            "ok": True,
+            "tools": player_tool_catalog(),
+            "note": (
+                "Player runs the same ToolExecutor as company AI agents. "
+                "City-only tools (post/award/cancel government contracts) and "
+                "LLM meta tool 'done' are excluded."
+            ),
+        }
+
+    @app.post("/api/player/action")
+    def player_action(body: PlayerActionBody) -> dict[str, Any]:
+        """Dispatch a named agent tool for the player company."""
+        try:
+            w = _require_world()
+            actor = w.get_actor("company", _player())
+            allowed = {t["name"] for t in player_tool_catalog()}
+            if body.name not in allowed:
+                return {
+                    "ok": False,
+                    "message": (
+                        f"Unknown or unavailable tool for player company: {body.name}. "
+                        f"Use GET /api/player/tools for the list."
+                    ),
+                }
+            executor = ToolExecutor(w, actor)
+            result = executor.execute(body.name, body.arguments or {})
+            # Persist after tool side-effects (ToolExecutor calls world methods that usually save)
+            w.persistence.save_all(w)
+            return result
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.get("/api/plots_for_sale")
+    def plots_for_sale(limit: int = 24) -> dict[str, Any]:
+        try:
+            w = _require_world()
+            actor = w.get_actor("company", _player())
+            executor = ToolExecutor(w, actor)
+            return executor.execute("list_plots_for_sale", {"limit": limit})
         except ActionError as exc:
             return _err(exc)
 
