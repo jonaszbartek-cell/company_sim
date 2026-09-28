@@ -8,7 +8,61 @@ const hudTime = document.getElementById("hud-time");
 const hudCash = document.getElementById("hud-cash");
 const selectedEl = document.getElementById("selected");
 const inventoryEl = document.getElementById("inventory");
+const buildingStorageEl = document.getElementById("building-storage");
 const marketEl = document.getElementById("market");
+const buildPreview = document.getElementById("build-preview");
+const buildGallery = document.getElementById("build-gallery");
+const artCache = new Map();
+
+function artUrl(path, fallbackKind, id) {
+  if (path) return path;
+  if (fallbackKind === "good") return `/static/assets/goods/${id}.svg`;
+  if (fallbackKind === "building-map") return `/static/assets/buildings/map/${id}.svg`;
+  if (fallbackKind === "building-ui") return `/static/assets/buildings/ui/${id}.svg`;
+  return "";
+}
+
+function loadArt(url) {
+  if (!url) return null;
+  if (artCache.has(url)) return artCache.get(url);
+  const img = new Image();
+  img.src = url;
+  img.decoding = "async";
+  img.onload = () => draw();
+  artCache.set(url, img);
+  return img;
+}
+
+function itemArt(itemId) {
+  const items = state?.content?.items || [];
+  const hit = items.find((i) => i.id === itemId);
+  return artUrl(hit?.art, "good", itemId);
+}
+
+function buildingArt(buildingId, kind = "map") {
+  const buildings = state?.content?.buildings || [];
+  const hit = buildings.find((b) => b.id === buildingId);
+  const path = kind === "ui" ? hit?.art?.ui : hit?.art?.map;
+  return artUrl(path, kind === "ui" ? "building-ui" : "building-map", buildingId);
+}
+
+function renderIconList(el, entries, emptyText) {
+  if (!el) return;
+  if (!entries.length) {
+    el.innerHTML = `<div class="icon-empty">${emptyText}</div>`;
+    return;
+  }
+  el.innerHTML = entries
+    .map(
+      ([id, qty, extra]) =>
+        `<div class="icon-row">` +
+        `<img src="${itemArt(id)}" alt="${id}" />` +
+        `<div><strong>${qty}× ${id}</strong>` +
+        (extra ? `<div class="meta">${extra}</div>` : "") +
+        `</div></div>`
+    )
+    .join("");
+}
 const proposalsEl = document.getElementById("proposals");
 const plotsForSaleEl = document.getElementById("plots-for-sale");
 const govContractsEl = document.getElementById("gov-contracts");
@@ -200,9 +254,18 @@ function draw() {
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
     if (t.plot.building) {
-      ctx.fillStyle = "#1a1008";
-      ctx.font = `${Math.max(9, cellSize * 0.4)}px sans-serif`;
-      ctx.fillText(t.plot.owner_kind === "city" ? "M" : "B", px + 3, py + cellSize - 3);
+      const bid = t.plot.building.building_id || t.plot.building.building_type;
+      const url = buildingArt(bid, "map");
+      const img = loadArt(url);
+      const pad = Math.max(2, Math.floor(cellSize * 0.12));
+      if (img && img.complete && img.naturalWidth > 0) {
+        ctx.drawImage(img, px + pad, py + pad, cellSize - pad * 2, cellSize - pad * 2);
+      } else {
+        ctx.fillStyle = "#1a1008";
+        ctx.font = `${Math.max(9, cellSize * 0.35)}px sans-serif`;
+        const label = (bid || "B").slice(0, 3).toUpperCase();
+        ctx.fillText(label, px + 3, py + cellSize - 3);
+      }
     }
   }
 
@@ -231,17 +294,51 @@ function refreshContentSelects() {
   if (buildings.length) {
     const prev = buildId.value;
     buildId.innerHTML = buildings
-      .map((b) => `<option value="${b.id}">${b.id}</option>`)
+      .map((b) => `<option value="${b.id}">${b.name || b.id}</option>`)
       .join("");
     if (prev && [...buildId.options].some((o) => o.value === prev)) buildId.value = prev;
+    updateBuildPreview();
+    if (buildGallery) {
+      buildGallery.innerHTML = buildings
+        .map((b) => {
+          const src = buildingArt(b.id, "ui");
+          const active = b.id === buildId.value ? "active" : "";
+          return (
+            `<button type="button" data-building-id="${b.id}" class="${active}" title="${b.name || b.id}">` +
+            `<img src="${src}" alt="${b.id}" />` +
+            `<span>${b.id.replaceAll("_", " ")}</span></button>`
+          );
+        })
+        .join("");
+      for (const btn of buildGallery.querySelectorAll("button[data-building-id]")) {
+        btn.onclick = () => {
+          buildId.value = btn.dataset.buildingId;
+          updateBuildPreview();
+          refreshContentSelects();
+        };
+      }
+    }
   }
   if (methods.length) {
     const prev = methodId.value;
-    methodId.innerHTML = methods
+    // Prefer methods for currently selected building type when possible
+    const forBuilding = buildId.value
+      ? methods.filter((m) => m.building_id === buildId.value)
+      : methods;
+    const list = forBuilding.length ? forBuilding : methods;
+    methodId.innerHTML = list
       .map((m) => `<option value="${m.id}">${m.id}</option>`)
       .join("");
     if (prev && [...methodId.options].some((o) => o.value === prev)) methodId.value = prev;
   }
+}
+
+function updateBuildPreview() {
+  if (!buildPreview || !buildId.value) return;
+  const src = buildingArt(buildId.value, "ui");
+  buildPreview.src = src;
+  buildPreview.hidden = !src;
+  loadArt(buildingArt(buildId.value, "map"));
 }
 
 function refreshGovPanel() {
@@ -278,18 +375,41 @@ function refreshPanels() {
     (state.current_turn ? ` | AI:${state.current_turn}` : "");
   const player = state.companies.find((c) => c.id === state.player_company_id);
   hudCash.textContent = player ? `cash=${player.cash}` : "cash=—";
-  inventoryEl.textContent = player ? JSON.stringify(player.inventory, null, 2) : "—";
+  if (player?.inventory) {
+    const entries = Object.entries(player.inventory)
+      .filter(([, q]) => q > 0)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([id, qty]) => [id, qty, ""]);
+    renderIconList(inventoryEl, entries, "(empty)");
+  } else {
+    renderIconList(inventoryEl, [], "—");
+  }
   refreshContentSelects();
+  if (selected?.plot?.building) {
+    const b = selected.plot.building;
+    const storage = b.storage || {};
+    const cap = b.storage_capacity || {};
+    const keys = [...new Set([...Object.keys(cap), ...Object.keys(storage)])].sort();
+    const entries = keys.map((id) => {
+      const qty = storage[id] ?? 0;
+      const c = cap[id];
+      return [id, qty, c != null ? `cap ${c}` : "orphan"];
+    });
+    renderIconList(buildingStorageEl, entries, "(no storage slots)");
+  } else {
+    renderIconList(buildingStorageEl, [], "Select a plot with a building");
+  }
   if (state.market) {
     const sells = (state.market.sell_listings || []).slice(0, 8);
     const buys = (state.market.buy_listings || []).slice(0, 6);
-    const sellTxt = sells.length
-      ? sells.map((L) => `S#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
-      : "(no sells)";
-    const buyTxt = buys.length
-      ? buys.map((L) => `B#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
-      : "(no buys)";
-    marketEl.textContent = `${sellTxt}\n---\n${buyTxt}`;
+    const rows = [];
+    for (const L of sells) {
+      rows.push([L.item_id, L.quantity, `sell #${L.id} @${L.price}`]);
+    }
+    for (const L of buys) {
+      rows.push([L.item_id, L.quantity, `buy #${L.id} @${L.price}`]);
+    }
+    renderIconList(marketEl, rows, "(no listings)");
   }
   if (state.proposals) {
     const props = state.proposals.proposals || [];
@@ -639,6 +759,11 @@ function refreshMailLog() {
 }
 
 mailTo.addEventListener("change", refreshMailLog);
+buildId.addEventListener("change", () => {
+  updateBuildPreview();
+  refreshContentSelects();
+});
+toolSelect.addEventListener("change", renderToolArgs);
 
 btnMailSend.addEventListener("click", async () => {
   const to = mailTo.value;

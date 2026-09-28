@@ -30,14 +30,20 @@ class Item:
             "category": self.category,
             "description": self.description,
             "stackable": self.stackable,
+            "art": f"/static/assets/goods/{self.id}.svg",
         }
 
 
 @dataclass
 class Inventory:
-    """Quantity map keyed by Item.id."""
+    """Quantity map keyed by Item.id.
+
+    ``reserved`` keys are hard slots: they stay in ``quantities`` even at 0
+    (used for building storage that must show every allowed good).
+    """
 
     quantities: dict[str, int] = field(default_factory=dict)
+    reserved: set[str] = field(default_factory=set)
 
     def get(self, item_id: str) -> int:
         return int(self.quantities.get(item_id, 0))
@@ -45,10 +51,10 @@ class Inventory:
     def set(self, item_id: str, qty: int) -> None:
         if qty < 0:
             raise ValueError(f"Negative inventory for {item_id}")
-        if qty == 0:
+        if qty == 0 and item_id not in self.reserved:
             self.quantities.pop(item_id, None)
         else:
-            self.quantities[item_id] = qty
+            self.quantities[item_id] = int(qty)
 
     def add(self, item_id: str, qty: int) -> None:
         self.set(item_id, self.get(item_id) + qty)
@@ -66,6 +72,18 @@ class Inventory:
     def produce(self, outputs: dict[str, int]) -> None:
         for item_id, qty in outputs.items():
             self.add(item_id, qty)
+
+    def reserve_slots(self, item_ids: list[str] | set[str] | tuple[str, ...]) -> None:
+        """Materialize hard slots (qty 0 kept) for the given item ids."""
+        for item_id in item_ids:
+            self.reserved.add(item_id)
+            if item_id not in self.quantities:
+                self.quantities[item_id] = 0
+
+    def unreserve_slot(self, item_id: str) -> None:
+        self.reserved.discard(item_id)
+        if self.quantities.get(item_id, 0) == 0:
+            self.quantities.pop(item_id, None)
 
     def as_dict(self) -> dict[str, int]:
         return dict(self.quantities)

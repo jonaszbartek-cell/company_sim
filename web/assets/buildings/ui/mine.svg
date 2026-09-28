@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+  <rect width="72" height="72" rx="8.6" fill="#5c4033" stroke="#c4a484" stroke-width="2"/>
+  <text x="50%" y="42%" text-anchor="middle" fill="#c4a484" font-family="Segoe UI, sans-serif" font-size="10" font-weight="700">BUILD</text>
+  <text x="50%" y="68%" text-anchor="middle" fill="#c4a484" font-family="Segoe UI, sans-serif" font-size="9" opacity="0.95">Mine</text>
+</svg>
