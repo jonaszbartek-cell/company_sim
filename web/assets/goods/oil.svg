@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 48 48">
+  <rect width="48" height="48" rx="5.8" fill="#6b5344" stroke="#d4a574" stroke-width="2"/>
+  <text x="50%" y="42%" text-anchor="middle" fill="#d4a574" font-family="Segoe UI, sans-serif" font-size="8" font-weight="700">RAW</text>
+  <text x="50%" y="68%" text-anchor="middle" fill="#d4a574" font-family="Segoe UI, sans-serif" font-size="7" opacity="0.95">oil</text>
+</svg>

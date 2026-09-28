@@ -40,6 +40,7 @@ Market
 - Runtime **goods_index** + reverse indexes on `GameContent` (also `saves/goods_index.txt` for LLMs)
 - Building storage: **cap 10** of every good used/made by that building's methods (auto-updates with YAML)
 - Build cost placeholder: **100 cash + 10 construction_materials**; destroy returns floor(10%) of materials + storage contents
+- Placeholder arts under `web/assets/` (`goods/`, `buildings/map/`, `buildings/ui/`) keyed by catalog id
 
 ## Later
 

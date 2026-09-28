@@ -42,6 +42,10 @@ class BuildingDefinition:
             "build_cost": self.build_cost,
             "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
+            "art": {
+                "map": f"/static/assets/buildings/map/{self.id}.svg",
+                "ui": f"/static/assets/buildings/ui/{self.id}.svg",
+            },
         }
 
 
@@ -50,9 +54,11 @@ class Building:
     """
     Runtime instance of a building on a plot.
 
-    Storage holds goods for recipes that run here. Allowed slots = union of
-    all method inputs/outputs for this building_id (capacity 10 each), derived
-    from GameContent so YAML changes update automatically. Contents belong to
+    On build, storage slots are *materialized*: one hard slot (cap usually 10)
+    for every good that any method of this building_id uses or produces.
+    ``storage_capacity`` is the live slot map on the instance; call
+    ``reconcile_storage(content)`` after catalog updates / on load so new
+    YAML methods add slots without wiping existing stock. Contents belong to
     the plot owner.
     """
 
@@ -64,6 +70,45 @@ class Building:
     status: BuildingStatus = "idle"
     progress: float = 0.0  # 0..1 toward next batch (legacy / multi-day)
     storage: Inventory = field(default_factory=Inventory)
+    # Materialized at build / reconcile: item_id -> capacity
+    storage_capacity: dict[str, int] = field(default_factory=dict)
+
+    def materialize_storage(self, capacity: dict[str, int]) -> None:
+        """Create hard storage slots from a capacity map (call on build)."""
+        self.storage_capacity = {str(k): int(v) for k, v in capacity.items()}
+        self.storage.reserve_slots(self.storage_capacity.keys())
+
+    def reconcile_storage(self, capacity: dict[str, int]) -> dict[str, object]:
+        """Sync slots with current catalog capacity without losing stock.
+
+        - New catalog goods → add hard slots at 0
+        - Removed catalog goods with qty 0 → drop slot
+        - Removed catalog goods with qty > 0 → keep stock (orphan) until withdrawn;
+          slot is no longer depositable (not in storage_capacity)
+        """
+        expected = {str(k): int(v) for k, v in capacity.items()}
+        added = sorted(set(expected) - set(self.storage_capacity))
+        removed_empty: list[str] = []
+        orphans: list[str] = []
+        for item_id in list(self.storage_capacity.keys()):
+            if item_id in expected:
+                continue
+            qty = self.storage.get(item_id)
+            del self.storage_capacity[item_id]
+            if qty <= 0:
+                self.storage.unreserve_slot(item_id)
+                removed_empty.append(item_id)
+            else:
+                # Keep quantities; no longer a formal slot
+                self.storage.reserved.discard(item_id)
+                orphans.append(item_id)
+        self.storage_capacity.update(expected)
+        self.storage.reserve_slots(expected.keys())
+        return {
+            "added": added,
+            "removed_empty": sorted(removed_empty),
+            "orphans": sorted(orphans),
+        }
 
     def to_public_dict(self) -> dict:
         return {
@@ -76,6 +121,11 @@ class Building:
             "status": self.status,
             "progress": self.progress,
             "storage": self.storage.as_dict(),
+            "storage_capacity": dict(self.storage_capacity),
+            "art": {
+                "map": f"/static/assets/buildings/map/{self.building_id}.svg",
+                "ui": f"/static/assets/buildings/ui/{self.building_id}.svg",
+            },
         }
 
 

@@ -124,6 +124,7 @@ class GameContent:
                 "category": item.category,
                 "description": item.description,
                 "stackable": item.stackable,
+                "art": f"/static/assets/goods/{item.id}.svg",
                 "made_in_buildings": sorted(set(made_in_buildings)),
                 "produced_by_methods": list(made_in_methods),
                 "used_in_methods": list(used_in.get(item.id, [])),

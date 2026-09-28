@@ -269,12 +269,12 @@ class GamePersistence:
             b = t.plot.building
             if b:
                 methods = [m.id for m in world.content.methods_for_building(b.building_id)]
-                cap = world.content.storage_capacity_for_building(b.building_id)
+                world.ensure_building_storage(b)
                 binfo = (
                     f"building id={b.id} type={b.building_id} status={b.status} "
                     f"method={b.production_method_id} possible={methods} "
-                    f"storage={b.storage.as_dict() or '{}'} "
-                    f"storage_cap={cap}"
+                    f"storage={b.storage.as_dict()} "
+                    f"storage_cap={b.storage_capacity}"
                 )
             else:
                 binfo = "building=none"

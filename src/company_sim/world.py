@@ -190,6 +190,7 @@ class World:
         world._seed_market()
         assert world.mailboxes is not None
         world.mailboxes.ensure_all_pairs(world.iter_all_actors())
+        world.reconcile_all_building_storage()
         world.persistence.save_all(world)
         # One COMPANY/CITY_INSTRUCTIONS_<id>.txt stub per agent (placeholder body)
         assert world.file_store is not None
@@ -202,6 +203,50 @@ class World:
         if self.mailboxes is None:
             raise ActionError("Mailboxes not initialized")
         return self.mailboxes
+
+    def ensure_building_storage(self, building: Building) -> None:
+        """Ensure a building has materialized slots (legacy / pre-storage saves)."""
+        expected = self.content.storage_capacity_for_building(building.building_id)
+        if not building.storage_capacity:
+            building.materialize_storage(expected)
+        else:
+            building.reconcile_storage(expected)
+
+    def reconcile_all_building_storage(self) -> list[dict]:
+        """Sync every building's hard slots with current YAML methods.
+
+        Safe to call on load / after content updates: adds new slots, drops empty
+        obsolete slots, keeps orphan stock that no longer matches a method.
+        """
+        reports: list[dict] = []
+        for tile in self.grid.tiles:
+            if not tile.plot or not tile.plot.building:
+                continue
+            b = tile.plot.building
+            expected = self.content.storage_capacity_for_building(b.building_id)
+            if not b.storage_capacity:
+                b.materialize_storage(expected)
+                reports.append(
+                    {
+                        "building_id": b.building_id,
+                        "x": tile.x,
+                        "y": tile.y,
+                        "materialized": True,
+                        "slots": sorted(b.storage_capacity.keys()),
+                    }
+                )
+            else:
+                diff = b.reconcile_storage(expected)
+                if diff["added"] or diff["removed_empty"] or diff["orphans"]:
+                    reports.append(
+                        {
+                            "building_id": b.building_id,
+                            "x": tile.x,
+                            "y": tile.y,
+                            **diff,
+                        }
+                    )
+        return reports
 
     def _seed_market(self) -> None:
         # Optional: flood market with every catalog good (for loop tests / demos)
@@ -375,7 +420,7 @@ class World:
         actor.cash -= bdef.build_cost
         if bdef.build_cost_items:
             actor.inventory.consume(bdef.build_cost_items)
-        tile.plot.building = Building(
+        building = Building(
             building_id=building_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
@@ -383,6 +428,9 @@ class World:
             status="idle",
             storage=Inventory(),
         )
+        # Hard slots: every good used/made by this building type appears at build time
+        building.materialize_storage(self.content.storage_capacity_for_building(building_id))
+        tile.plot.building = building
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
@@ -392,7 +440,8 @@ class World:
                 "cost_items": dict(bdef.build_cost_items),
                 "building_id": building_id,
                 "production_method_id": method_id,
-                "storage_capacity": self.content.storage_capacity_for_building(building_id),
+                "storage": building.storage.as_dict(),
+                "storage_capacity": dict(building.storage_capacity),
             },
         )
 
@@ -441,7 +490,8 @@ class World:
         if not self.items.has(item_id):
             raise ActionError(f"Unknown item: {item_id}")
         b = tile.plot.building
-        capacity = self.content.storage_capacity_for_building(b.building_id)
+        self.ensure_building_storage(b)
+        capacity = b.storage_capacity
         if item_id not in capacity:
             raise ActionError(
                 f"{item_id} cannot be stored in {b.building_id} "
@@ -458,7 +508,7 @@ class World:
         return ActionResult(
             True,
             f"Deposited {quantity}x {item_id} into building at ({x},{y})",
-            {"storage": b.storage.as_dict(), "capacity": capacity},
+            {"storage": b.storage.as_dict(), "capacity": dict(capacity)},
         )
 
     def withdraw_from_building(
@@ -542,12 +592,13 @@ class World:
         if method.building_id != b.building_id:
             raise ActionError("Method does not match building")
         # Production runs through building storage (owned by plot owner)
+        self.ensure_building_storage(b)
         if not b.storage.has(method.inputs):
             raise ActionError(
                 f"Missing inputs in building storage: need {method.inputs}, "
                 f"have {b.storage.as_dict()}"
             )
-        capacity = self.content.storage_capacity_for_building(b.building_id)
+        capacity = b.storage_capacity
         bonus = self.grid.production_bonus_at(x, y)
         batches = max(1, int(bonus))
         # Check output room for all batches before consuming
@@ -1535,6 +1586,8 @@ class World:
         )
 
     def to_public_dict(self) -> dict:
+        # Keep hard storage slots in sync with YAML (safe no-op when already current)
+        self.reconcile_all_building_storage()
         return {
             "started": self.started,
             "day": self.day,
