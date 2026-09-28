@@ -28,11 +28,26 @@ class BuildingDefinition:
     description: str = ""
     build_cost: int = 100  # cash
     build_cost_items: dict[str, int] = field(default_factory=dict)
-    allowed_plot_types: tuple[str, ...] = ("standard", "specialized")
+    allowed_plot_types: tuple[str, ...] = (
+        "standard",
+        "specialized_mine",
+        "specialized_well",
+    )
+    # Mine / Rig: production method chosen at build and cannot change later
+    locks_production_method: bool = False
 
     def allows_plot_type(self, plot_type: object) -> bool:
-        value = getattr(plot_type, "value", plot_type)
-        return str(value) in self.allowed_plot_types
+        value = str(getattr(plot_type, "value", plot_type))
+        if value in self.allowed_plot_types:
+            return True
+        # Legacy catalog entry "specialized" matches either resource plot
+        if "specialized" in self.allowed_plot_types and value in {
+            "specialized",
+            "specialized_mine",
+            "specialized_well",
+        }:
+            return True
+        return False
 
     def to_public_dict(self) -> dict:
         return {
@@ -42,6 +57,7 @@ class BuildingDefinition:
             "build_cost": self.build_cost,
             "build_cost_items": dict(self.build_cost_items),
             "allowed_plot_types": list(self.allowed_plot_types),
+            "locks_production_method": bool(self.locks_production_method),
             "art": {
                 "map": f"/static/assets/buildings/map/{self.id}/1x1.svg",
                 "ui": f"/static/assets/buildings/ui/{self.id}.svg",
@@ -67,6 +83,8 @@ class Building:
     owner_id: str
     id: str = field(default_factory=lambda: f"bld_{uuid.uuid4().hex[:8]}")
     production_method_id: str | None = None
+    # True for Mine/Rig after construct — set_production_method is rejected
+    production_method_locked: bool = False
     status: BuildingStatus = "idle"
     progress: float = 0.0  # 0..1 toward next batch (legacy / multi-day)
     storage: Inventory = field(default_factory=Inventory)
@@ -133,6 +151,7 @@ class Building:
             "owner_kind": self.owner_kind,
             "owner_id": self.owner_id,
             "production_method_id": self.production_method_id,
+            "production_method_locked": bool(self.production_method_locked),
             "status": self.status,
             "progress": self.progress,
             "storage": self.storage.as_dict(),
@@ -158,7 +177,10 @@ class BuildingCatalog:
         data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
         buildings: dict[str, BuildingDefinition] = {}
         for row in data.get("buildings", []):
-            allowed = tuple(row.get("allowed_plot_types") or ["standard", "specialized"])
+            allowed = tuple(
+                row.get("allowed_plot_types")
+                or ["standard", "specialized_mine", "specialized_well"]
+            )
             cost_items = {str(k): int(v) for k, v in (row.get("build_cost_items") or {}).items()}
             bdef = BuildingDefinition(
                 id=row["id"],
@@ -167,6 +189,7 @@ class BuildingCatalog:
                 build_cost=int(row.get("build_cost", 100)),
                 build_cost_items=cost_items,
                 allowed_plot_types=allowed,
+                locks_production_method=bool(row.get("locks_production_method", False)),
             )
             if bdef.id in buildings:
                 raise ValueError(f"Duplicate building id in {path}: {bdef.id}")

@@ -7,8 +7,9 @@
 #   build_cost_items: inventory goods consumed (default 10x construction_materials)
 #
 # Plot rules:
-#   Mine / Rig → specialized only
-#   All other factories → standard + specialized
+#   Mine → specialized_mine only (method locked at build)
+#   Rig  → specialized_well only (method locked at build; oil/gas/water via method)
+#   All other factories → standard + both specialized types
 
 buildings:
   - id: mine
@@ -17,8 +18,9 @@ buildings:
     build_cost: 100
     build_cost_items:
       construction_materials: 10
+    locks_production_method: true
     allowed_plot_types:
-      - specialized
+      - specialized_mine
 
   - id: rig
     name: Rig
@@ -26,8 +28,9 @@ buildings:
     build_cost: 100
     build_cost_items:
       construction_materials: 10
+    locks_production_method: true
     allowed_plot_types:
-      - specialized
+      - specialized_well
 
   - id: foundry
     name: Foundry
@@ -37,7 +40,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: refinery
     name: Refinery
@@ -47,7 +51,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: chemical_plant
     name: Chemical Plant
@@ -57,7 +62,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: manufacturing_facility
     name: Manufacturing Facility
@@ -67,7 +73,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: electronics_facility
     name: Electronics Facility
@@ -77,7 +84,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: assembly_facility
     name: Assembly Facility
@@ -87,7 +95,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: car_manufacturing_facility
     name: Car Manufacturing Facility
@@ -97,7 +106,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: plane_factory
     name: Plane Factory
@@ -107,7 +117,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: rocket_factory
     name: Rocket Factory
@@ -117,7 +128,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: satellite_factory
     name: Satellite Factory
@@ -127,7 +139,8 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well
 
   - id: power_plant
     name: Power Plant
@@ -137,4 +150,5 @@ buildings:
       construction_materials: 10
     allowed_plot_types:
       - standard
-      - specialized
+      - specialized_mine
+      - specialized_well

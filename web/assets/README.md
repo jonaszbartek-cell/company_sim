@@ -11,7 +11,9 @@ web/assets/
     map/{building_id}/{w}x{h}.svg     # fake-3D map sprites (1..9 × 1..9)
   terrain/
     grass.svg
-    grass_specialized.svg
+    grass_specialized.svg             # legacy tint
+    grass_specialized_mine.svg        # underground mine resources
+    grass_specialized_well.svg        # underground well resources (oil/gas/water)
   roads/
     mask_{0..15}.svg                  # asphalt + side lines (N=1 E=2 S=4 W=8)
 ```

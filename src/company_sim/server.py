@@ -24,6 +24,8 @@ class SetupBody(BaseModel):
     ai_companies: int = Field(default=2, ge=0, le=12)
     cities: int = Field(default=1, ge=1, le=8)
     map_size: int = Field(default=12, ge=2, le=128)
+    # Percent of all plots that become specialized mine/well resource clusters
+    specialized_plot_percent: float = Field(default=15.0, ge=0.0, le=100.0)
     llm_debug: bool = False
 
 
@@ -31,6 +33,7 @@ class BuildBody(BaseModel):
     x: int
     y: int
     building_id: str = "foundry"
+    method_id: str | None = None
 
 
 class PauseBody(BaseModel):
@@ -166,6 +169,7 @@ def create_app() -> FastAPI:
                             "ai_companies": 2,
                             "cities": 1,
                             "map_size": 12,
+                            "specialized_plot_percent": 15,
                             "llm_debug": False,
                         },
                     },
@@ -202,6 +206,7 @@ def create_app() -> FastAPI:
                 "ai_companies": 2,
                 "cities": 1,
                 "map_size": 12,
+                "specialized_plot_percent": 15,
                 "llm_debug": False,
             },
             "config": None
@@ -210,6 +215,7 @@ def create_app() -> FastAPI:
                 "ai_companies": world.config.ai_company_count,
                 "cities": world.config.starting_cities,
                 "map_size": world.config.map_size,
+                "specialized_plot_percent": world.config.specialized_plot_percent,
                 "llm_debug": world.config.llm_debug,
             },
         }
@@ -225,6 +231,7 @@ def create_app() -> FastAPI:
                     map_size=body.map_size,
                     starting_cities=body.cities,
                     ai_company_count=body.ai_companies,
+                    specialized_plot_percent=body.specialized_plot_percent,
                     llm_debug=bool(body.llm_debug),
                 )
             )
@@ -255,6 +262,7 @@ def create_app() -> FastAPI:
                     "ai_companies": 2,
                     "cities": 1,
                     "map_size": 12,
+                    "specialized_plot_percent": 15,
                     "llm_debug": False,
                 },
             }
@@ -318,7 +326,12 @@ def create_app() -> FastAPI:
     def build(body: BuildBody) -> dict[str, Any]:
         try:
             result = _require_world().build_building(
-                "company", _player(), body.x, body.y, body.building_id
+                "company",
+                _player(),
+                body.x,
+                body.y,
+                body.building_id,
+                method_id=body.method_id,
             )
             return _ok(result)
         except ActionError as exc:
@@ -642,7 +655,12 @@ def create_app() -> FastAPI:
                     {
                         "type": "setup",
                         "started": False,
-                        "defaults": {"ai_companies": 2, "cities": 1, "map_size": 12},
+                        "defaults": {
+                            "ai_companies": 2,
+                            "cities": 1,
+                            "map_size": 12,
+                            "specialized_plot_percent": 15,
+                        },
                     }
                 )
             while True:

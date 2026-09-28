@@ -51,7 +51,12 @@ function buildingArt(buildingId, kind = "map", fw = 1, fh = 1) {
 }
 
 function terrainArt(plotType) {
-  if (plotType === "specialized") return "/static/assets/terrain/grass_specialized.svg";
+  if (plotType === "specialized_mine" || plotType === "specialized") {
+    return "/static/assets/terrain/grass_specialized_mine.svg";
+  }
+  if (plotType === "specialized_well") {
+    return "/static/assets/terrain/grass_specialized_well.svg";
+  }
   return "/static/assets/terrain/grass.svg";
 }
 
@@ -156,6 +161,10 @@ function showSetup(defaults) {
     if (defaults.ai_companies != null) document.getElementById("setup-companies").value = defaults.ai_companies;
     if (defaults.cities != null) document.getElementById("setup-cities").value = defaults.cities;
     if (defaults.map_size != null) document.getElementById("setup-map").value = defaults.map_size;
+    const pctEl = document.getElementById("setup-specialized-pct");
+    if (pctEl && defaults.specialized_plot_percent != null) {
+      pctEl.value = defaults.specialized_plot_percent;
+    }
     if (defaults.llm_debug != null) document.getElementById("setup-llm-debug").checked = !!defaults.llm_debug;
   }
 }
@@ -240,7 +249,13 @@ function draw() {
     // Grass / specialized terrain
     const grass = loadArt(terrainArt(t.plot.plot_type));
     if (!drawImageFit(grass, px + 1, py + 1, cellSize - 2, cellSize - 2)) {
-      ctx.fillStyle = t.plot.plot_type === "specialized" ? "#4a6b3f" : "#3f6b4f";
+      const pt = t.plot.plot_type;
+      ctx.fillStyle =
+        pt === "specialized_well"
+          ? "#3a5a6a"
+          : pt === "specialized_mine" || pt === "specialized"
+            ? "#6a5a3a"
+            : "#3f6b4f";
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
 
@@ -334,6 +349,14 @@ function refreshContentSelects() {
   if (!state || !state.content) return;
   const buildings = state.content.buildings || [];
   const methods = state.content.production_methods || state.content.production || [];
+  const methodHint = document.getElementById("method-hint");
+  const selectedTile = selected ? tileAt(selected.x, selected.y) : null;
+  const existing = selectedTile?.plot?.building || null;
+
+  // When a built plot is selected, drive method list from that building;
+  // otherwise from the build picker target.
+  const focusBuildingId = existing?.building_id || buildId.value;
+
   if (buildings.length) {
     const prev = buildId.value;
     buildId.innerHTML = buildings
@@ -346,8 +369,9 @@ function refreshContentSelects() {
         .map((b) => {
           const src = buildingArt(b.id, "ui");
           const active = b.id === buildId.value ? "active" : "";
+          const lock = b.locks_production_method ? " · locks method" : "";
           return (
-            `<button type="button" data-building-id="${b.id}" class="${active}" title="${b.name || b.id}">` +
+            `<button type="button" data-building-id="${b.id}" class="${active}" title="${b.name || b.id}${lock}">` +
             `<img src="${src}" alt="${b.id}" />` +
             `<span>${b.id.replaceAll("_", " ")}</span></button>`
           );
@@ -364,15 +388,31 @@ function refreshContentSelects() {
   }
   if (methods.length) {
     const prev = methodId.value;
-    // Prefer methods for currently selected building type when possible
-    const forBuilding = buildId.value
-      ? methods.filter((m) => m.building_id === buildId.value)
+    const forBuilding = focusBuildingId
+      ? methods.filter((m) => m.building_id === focusBuildingId)
       : methods;
     const list = forBuilding.length ? forBuilding : methods;
     methodId.innerHTML = list
       .map((m) => `<option value="${m.id}">${m.id}</option>`)
       .join("");
-    if (prev && [...methodId.options].some((o) => o.value === prev)) methodId.value = prev;
+    if (existing?.production_method_id && [...methodId.options].some((o) => o.value === existing.production_method_id)) {
+      methodId.value = existing.production_method_id;
+    } else if (prev && [...methodId.options].some((o) => o.value === prev)) {
+      methodId.value = prev;
+    }
+  }
+  if (methodHint) {
+    if (existing?.production_method_locked) {
+      methodHint.textContent = `Method locked at build (${existing.production_method_id}) — Mine/Rig cannot change it.`;
+    } else if (existing) {
+      methodHint.textContent = `Current method: ${existing.production_method_id || "—"}. Change anytime with Change method.`;
+    } else {
+      const bdef = (state.content.buildings || []).find((b) => b.id === buildId.value);
+      const locks = bdef?.locks_production_method;
+      methodHint.textContent = locks
+        ? "Choose method, then Build with method — this building locks the method after construct."
+        : "Choose method, then Build with method — you can change it anytime later.";
+    }
   }
 }
 
@@ -491,6 +531,8 @@ function refreshPanels() {
   const canSell = t && isPlayerOwned(t.plot) && !t.plot.reserved_proposal_id;
   const canBuild = t && isPlayerOwned(t.plot) && !t.plot.building && !t.plot.reserved_proposal_id;
   const canProduce = t && isPlayerOwned(t.plot) && t.plot.building;
+  const canSetMethod =
+    canProduce && t.plot.building && !t.plot.building.production_method_locked;
   const canRoad = t && isPlayerOwned(t.plot);
   let canMerge = false;
   if (lastOwnedClick && t && isPlayerOwned(t.plot) && !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)) {
@@ -501,9 +543,10 @@ function refreshPanels() {
   btnPlotSell.disabled = !canSell;
   btnBuild.disabled = !canBuild;
   btnProduce.disabled = !canProduce;
-  btnSetMethod.disabled = !canProduce;
+  btnSetMethod.disabled = !canSetMethod;
   btnRoad.disabled = !canRoad;
   btnMerge.disabled = !canMerge;
+  refreshContentSelects();
 }
 
 function applyPayload(payload) {
@@ -530,6 +573,7 @@ setupForm.addEventListener("submit", async (ev) => {
     ai_companies: Number(document.getElementById("setup-companies").value),
     cities: Number(document.getElementById("setup-cities").value),
     map_size: Number(document.getElementById("setup-map").value),
+    specialized_plot_percent: Number(document.getElementById("setup-specialized-pct").value),
     llm_debug: document.getElementById("setup-llm-debug").checked,
   };
   const data = await api("/api/setup", body);
@@ -603,18 +647,28 @@ btnPlotSell.addEventListener("click", async () => {
 
 btnBuild.addEventListener("click", async () => {
   if (!selected) return;
+  if (!methodId.value) {
+    alert("Choose a production method before building.");
+    return;
+  }
   const data = await api("/api/player/build", {
     ...selected,
     building_id: buildId.value || "foundry",
+    method_id: methodId.value,
   });
   if (!data.ok) alert(data.message);
+  else toolResult.textContent = data.message || "built";
 });
 
 btnSetMethod.addEventListener("click", async () => {
   if (!selected) return;
+  if (!methodId.value) {
+    alert("Choose a production method.");
+    return;
+  }
   const data = await api("/api/player/set_production_method", {
     ...selected,
-    method_id: methodId.value || "make_steel",
+    method_id: methodId.value,
   });
   if (!data.ok) alert(data.message);
   else toolResult.textContent = data.message || "method set";

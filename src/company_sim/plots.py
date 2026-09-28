@@ -21,7 +21,28 @@ SIDE_DELTA: dict[str, tuple[int, int]] = {
 
 class PlotType(str, Enum):
     STANDARD = "standard"
-    SPECIALIZED = "specialized"
+    # Underground mine resources — Mine buildings only
+    SPECIALIZED_MINE = "specialized_mine"
+    # Underground well resources — Rig buildings only (oil/gas/water chosen via method)
+    SPECIALIZED_WELL = "specialized_well"
+
+
+# Legacy alias used in older catalogs / saves
+SPECIALIZED_ALIASES = frozenset({"specialized", "specialized_mine", "specialized_well"})
+
+
+def normalize_plot_type(value: object) -> PlotType:
+    raw = getattr(value, "value", value)
+    text = str(raw)
+    if text == "specialized":
+        # Old single specialized type → treat as mine resource for load compat
+        return PlotType.SPECIALIZED_MINE
+    return PlotType(text)
+
+
+def is_specialized_plot_type(value: object) -> bool:
+    raw = getattr(value, "value", value)
+    return str(raw) in SPECIALIZED_ALIASES
 
 
 def _empty_sides_bool() -> dict[str, bool]:

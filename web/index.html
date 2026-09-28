@@ -20,6 +20,12 @@
       <label>Map size (plots per side)
         <input id="setup-map" type="number" min="2" max="128" value="12" />
       </label>
+      <label>Specialized resources (% of plots)
+        <input id="setup-specialized-pct" type="number" min="0" max="100" step="1" value="15" />
+      </label>
+      <p class="setup-lead" style="margin-top:-0.4rem;font-size:0.85rem;opacity:0.85">
+        Mine + well resource clusters (at least 5 of each when the map is large enough).
+      </p>
       <label class="setup-check">
         <input id="setup-llm-debug" type="checkbox" />
         LLM debug (write per-turn traces under saves/llm_debug/)
@@ -54,18 +60,21 @@
             </select>
           </label>
           <img id="build-preview" class="art-preview" alt="" hidden />
-          <button id="btn-build" type="button" disabled>Build</button>
+          <button id="btn-build" type="button" disabled>Build with method</button>
           <button id="btn-produce" type="button" disabled>Produce</button>
         </div>
         <div id="build-gallery" class="art-gallery" aria-label="Building catalog"></div>
         <div class="row">
-          <label class="inline">Method
+          <label class="inline">Production method
             <select id="method-id">
               <option value="make_steel">make_steel</option>
             </select>
           </label>
-          <button id="btn-set-method" type="button" disabled>Set method</button>
+          <button id="btn-set-method" type="button" disabled>Change method</button>
         </div>
+        <p id="method-hint" class="setup-lead" style="margin:0.25rem 0 0.75rem;font-size:0.85rem;opacity:0.85">
+          Choose a method before Build. Change later anytime unless the building locks it (Mine/Rig).
+        </p>
         <div class="row">
           <label class="inline">Road side
             <select id="road-side">

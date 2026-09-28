@@ -38,10 +38,14 @@ def test_goods_index_steel_and_energy():
 
 def test_mine_rig_specialized_only_factories_wider():
     c = GameContent.load()
-    assert c.buildings.get("mine").allowed_plot_types == ("specialized",)
-    assert c.buildings.get("rig").allowed_plot_types == ("specialized",)
+    assert c.buildings.get("mine").allowed_plot_types == ("specialized_mine",)
+    assert c.buildings.get("rig").allowed_plot_types == ("specialized_well",)
+    assert c.buildings.get("mine").locks_production_method is True
+    assert c.buildings.get("rig").locks_production_method is True
+    assert c.buildings.get("foundry").locks_production_method is False
     assert "standard" in c.buildings.get("foundry").allowed_plot_types
-    assert "specialized" in c.buildings.get("foundry").allowed_plot_types
+    assert "specialized_mine" in c.buildings.get("foundry").allowed_plot_types
+    assert "specialized_well" in c.buildings.get("foundry").allowed_plot_types
 
 
 def test_build_costs_cash_and_construction_materials():
@@ -102,6 +106,7 @@ def test_mine_requires_specialized_plot():
                 ai_company_count=0,
                 save_dir=str(td),
                 min_seconds_between_turns=0.0,
+                specialized_plot_percent=40.0,
             )
         )
         player = w.companies["player"]
@@ -112,11 +117,19 @@ def test_mine_requires_specialized_plot():
         with pytest.raises(ActionError, match="specialized|cannot be built"):
             w.build_building("company", "player", std.x, std.y, "mine")
         spec = next(
-            t for t in w.grid.tiles if t.plot and t.plot.plot_type.value == "specialized"
+            t
+            for t in w.grid.tiles
+            if t.plot and t.plot.plot_type.value == "specialized_mine"
         )
         spec.plot.claim("company", "player")
-        r = w.build_building("company", "player", spec.x, spec.y, "mine")
+        r = w.build_building(
+            "company", "player", spec.x, spec.y, "mine", method_id="extract_coal"
+        )
         assert r.ok
+        assert r.data["production_method_id"] == "extract_coal"
+        assert r.data["production_method_locked"] is True
+        with pytest.raises(ActionError, match="locked"):
+            w.set_production_method("company", "player", spec.x, spec.y, "extract_iron_ore")
 
 
 def test_goods_index_file_written_and_packed():

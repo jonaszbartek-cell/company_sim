@@ -159,13 +159,21 @@ class AIScheduler:
             t.plot and t.plot.building is None for t in owned
         ):
             t0 = owned[0]
+            ptype = t0.plot.plot_type.value if t0.plot else "standard"
+            if ptype == "specialized_mine":
+                bid, mid = "mine", "extract_iron_ore"
+            elif ptype == "specialized_well":
+                bid, mid = "rig", "extract_oil"
+            else:
+                bid, mid = "foundry", "make_steel"
             now_hint = (
-                f"NOW: you own empty plot(s). Call build_building(x={t0.x}, y={t0.y}, "
-                f"building_id=\"foundry\"), then done."
+                f"NOW: you own empty plot(s) ({ptype}). Call build_building(x={t0.x}, y={t0.y}, "
+                f"building_id=\"{bid}\", method_id=\"{mid}\") to choose the method at build, then done."
             )
         else:
             now_hint = (
-                "NOW: call tools only. Start with get_status, take 1-2 useful actions, then done."
+                "NOW: call tools only. Start with get_status, take 1-2 useful actions, then done. "
+                "To change an unlocked factory method anytime: set_production_method."
             )
         user = (
             bundle.prompt_text
