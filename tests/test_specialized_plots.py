@@ -33,18 +33,34 @@ def test_plan_guarantees_five_of_each_when_map_allows():
     assert counts[PlotType.SPECIALIZED_WELL] >= 5
 
 
+def test_guaranteed_five_are_scattered_not_clustered():
+    """When only the guarantee applies, plots should not form tight clusters."""
+    # percent=0 still forces guarantee*2; all of those must be random scatter
+    plan = plan_specialized_plots(20, 20, percent=0.0, min_each=5, seed=11)
+    for kind in (PlotType.SPECIALIZED_MINE, PlotType.SPECIALIZED_WELL):
+        cells = [c for c, t in plan.items() if t == kind]
+        assert len(cells) == 5
+        # Few same-type cells should be adjacent (manhattan 1) — scatter, not a blob
+        adjacent_pairs = 0
+        for i, (x, y) in enumerate(cells):
+            for ox, oy in cells[i + 1 :]:
+                if abs(x - ox) + abs(y - oy) == 1:
+                    adjacent_pairs += 1
+        assert adjacent_pairs <= 1
+
+
 def test_plan_respects_percent_roughly():
     n = 20 * 20
     plan = plan_specialized_plots(20, 20, percent=25.0, min_each=5, seed=7)
     assert abs(len(plan) - round(n * 0.25)) <= 2 or len(plan) >= 10
 
 
-def test_specialized_plots_form_clusters_not_random_scatter():
-    """Most specialized cells should have a same-type neighbor within distance 2."""
-    plan = plan_specialized_plots(16, 16, percent=20.0, min_each=5, seed=3)
+def test_extra_percent_plots_form_clusters():
+    """Beyond the random guarantee, additional specialized cells cluster regionally."""
+    plan = plan_specialized_plots(24, 24, percent=30.0, min_each=5, seed=3)
     for kind in (PlotType.SPECIALIZED_MINE, PlotType.SPECIALIZED_WELL):
         cells = [c for c, t in plan.items() if t == kind]
-        assert len(cells) >= 5
+        assert len(cells) > 5  # extras beyond the random 5
         near = 0
         for x, y in cells:
             if any(
@@ -52,7 +68,7 @@ def test_specialized_plots_form_clusters_not_random_scatter():
                 for ox, oy in cells
             ):
                 near += 1
-        assert near / len(cells) >= 0.5
+        assert near / len(cells) >= 0.45
 
 
 def test_world_generation_two_specialized_types_and_counts():

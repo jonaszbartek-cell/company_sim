@@ -374,23 +374,27 @@ def plan_specialized_plots(
     seed: int | None = None,
 ) -> dict[tuple[int, int], PlotType]:
     """
-    Choose clustered specialized_mine / specialized_well cells.
+    Place specialized_mine / specialized_well cells.
 
-    - ``percent`` of all plots become specialized (split across both types).
-    - At least ``min_each`` of each type when the map has room (clamped on tiny maps).
-    - Plots are placed in regional clusters with optional small gaps (not always adjacent).
+    - Guaranteed ``min_each`` of each type (when the map has room) are placed
+      **randomly** across the map — not clustered.
+    - Any additional plots from ``percent`` of all cells are placed in regional
+      clusters (with optional small gaps).
     """
     import random
 
     n = width * height
     if n <= 0:
         return {}
-    rng = random.Random(seed if seed is not None else (width * 10007 + height * 17 + int(percent * 10)))
+    rng = random.Random(
+        seed if seed is not None else (width * 10007 + height * 17 + int(percent * 10))
+    )
     cells = [(x, y) for y in range(height) for x in range(width)]
     pct = max(0.0, min(100.0, float(percent)))
     target_total = int(round(n * pct / 100.0))
     capacity_each = n // 2
     guarantee = min(int(min_each), capacity_each)
+    # Always include the random guarantees; percent may add more on top
     target_total = max(target_total, guarantee * 2)
     target_total = min(target_total, n)
     n_mine = max(guarantee, target_total // 2)
@@ -403,7 +407,18 @@ def plan_specialized_plots(
         else:
             break
 
-    def _place(count: int, taken: set[tuple[int, int]]) -> set[tuple[int, int]]:
+    def _place_random(count: int, taken: set[tuple[int, int]]) -> set[tuple[int, int]]:
+        """Scatter ``count`` cells uniformly at random (no clustering)."""
+        if count <= 0:
+            return set()
+        available = [c for c in cells if c not in taken]
+        if not available:
+            return set()
+        rng.shuffle(available)
+        return set(available[: min(count, len(available))])
+
+    def _place_clustered(count: int, taken: set[tuple[int, int]]) -> set[tuple[int, int]]:
+        """Regional clusters with optional small gaps."""
         if count <= 0:
             return set()
         available = [c for c in cells if c not in taken]
@@ -433,7 +448,6 @@ def plan_specialized_plots(
             for i, c in enumerate(nearby):
                 if len(chosen) >= count:
                     break
-                # Leave occasional gaps inside the cluster region
                 if i == 0 or rng.random() < 0.7:
                     chosen.add(c)
             if len(chosen) >= count:
@@ -449,8 +463,20 @@ def plan_specialized_plots(
                 chosen.add(c)
         return chosen
 
-    mine_cells = _place(n_mine, set())
-    well_cells = _place(n_well, mine_cells)
+    # Phase 1: guaranteed minimums — random scatter (not clustered)
+    g_mine = min(guarantee, n_mine)
+    g_well = min(guarantee, n_well)
+    mine_cells = _place_random(g_mine, set())
+    well_cells = _place_random(g_well, mine_cells)
+
+    # Phase 2: remaining from percent — clustered
+    extra_mine = max(0, n_mine - len(mine_cells))
+    extra_well = max(0, n_well - len(well_cells))
+    taken = mine_cells | well_cells
+    mine_cells |= _place_clustered(extra_mine, taken)
+    taken = mine_cells | well_cells
+    well_cells |= _place_clustered(extra_well, taken)
+
     out: dict[tuple[int, int], PlotType] = {}
     for c in mine_cells:
         out[c] = PlotType.SPECIALIZED_MINE
@@ -472,9 +498,8 @@ def generate_map(
     city_seeds: (id, name, center_x, center_y, population)
     Territory is assigned by nearest city center; ownership is applied by World.
 
-    Specialized resource plots (mine / well) are placed in clusters according to
-    ``specialized_plot_percent`` of all cells, with a guaranteed minimum of each
-    type when the map is large enough.
+    Specialized resource plots: a guaranteed random scatter of mine/well cells,
+    plus additional clustered cells from ``specialized_plot_percent``.
     """
     if size < 2:
         raise ValueError("Map size must be at least 2")
