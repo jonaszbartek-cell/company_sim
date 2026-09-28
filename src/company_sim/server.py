@@ -23,7 +23,7 @@ WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 class SetupBody(BaseModel):
     ai_companies: int = Field(default=2, ge=0, le=12)
     cities: int = Field(default=1, ge=1, le=8)
-    map_size: int = Field(default=12, ge=2, le=40)
+    map_size: int = Field(default=12, ge=2, le=128)
     llm_debug: bool = False
 
 
