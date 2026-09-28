@@ -119,11 +119,26 @@ class AIScheduler:
             self.busy = False
 
     def _run_llm_session(self, world: World, actor: Actor) -> str:
-        # Refresh text files; feed world + market + this agent into the prompt
-        file_bundle = world.persistence.load_context_for_agent(world, actor)
+        # Compact context: small local models ignore tools when the prompt is huge.
+        world.persistence.save_all(world)
+        agent_txt = world.persistence.agent_path(actor.id).read_text(encoding="utf-8")
+        mine = world.proposals.pending_for(actor.kind, actor.id)
+        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
+        if mine:
+            mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
+        else:
+            mine_txt += "(none)\n"
+        gov_path = world.persistence.root / "government_contracts.txt"
+        gov_txt = gov_path.read_text(encoding="utf-8")[:2500] if gov_path.exists() else ""
+        file_bundle = f"{agent_txt}\n{mine_txt}\n{gov_txt}\n"
         executor = ToolExecutor(world, actor)
         system = system_prompt_for(actor)
-        user = file_bundle + "\n" + build_actor_context(world, actor)
+        user = (
+            file_bundle
+            + "\n"
+            + build_actor_context(world, actor)
+            + "\nNOW: call tools only. Start with get_status or list_plots_for_sale, then act, then done."
+        )
         messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
 
         for _ in range(self.llm.config.max_tool_rounds):

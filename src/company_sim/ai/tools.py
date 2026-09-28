@@ -493,26 +493,36 @@ def build_actor_context(world: World, actor: Actor) -> str:
         f"Cash: {actor.cash} | Inventory: {actor.inventory.as_dict()}\n"
         f"Owned plots ({len(owned)}):\n"
         + ("\n".join(owned_lines) if owned_lines else "  (none)")
-        + "\nLoop: buy plot → build → buy inputs → produce → sell. Negotiate via send_message. Goal: strongest company.\n"
-        "Prefer 1-3 actions then call done."
+        + "\n"
+        "RULE: reply with tool calls only (no prose). "
+        "Companies with no land: list_plots_for_sale then propose_plot_buy then done. "
+        "Otherwise: get_status → act → done. 1-3 tools then done."
     )
 
 
 def system_prompt_for(actor: Actor) -> str:
+    base = (
+        "CRITICAL: Respond ONLY by calling tools. Never write plans, markdown, or prose. "
+        "Each turn: call 1-3 tools, then call done. "
+    )
     if actor.kind == "city":
         return (
-            "You administer a city of normal roads and plots. "
-            "You CANNOT use the market. To buy goods, post_government_contract with required "
-            "resources, then award_government_contract (lowest company bid wins). "
-            "Sell plots via propose_plot_sell, buy via propose_plot_buy (accept/reject), build edge roads on owned plots, combine adjacent plots without roads between. "
-            "Stay within cash. Use only the provided tools. Be concise."
+            base
+            + "You administer a city. You CANNOT use the market. "
+            "Procure goods with post_government_contract then award_government_contract. "
+            "Sell/buy land with propose_plot_sell / propose_plot_buy (accept/reject). "
+            "Build edge roads with build_road (side N/E/S/W, costs 1 steel). "
+            "Combine adjacent owned plots with merge_plots when no road between. "
+            "Accept or reject pending proposals addressed to you."
         )
     return (
-        "You run a company. Become the strongest firm: "
-        "buy plots via propose_plot_buy (cities own land at start), build foundries, trade on the market, and bid on city government contracts. "
-        "When awarded a contract, gather the goods and fulfill_government_contract to get paid. "
-        "You may send_message, propose_sell/propose_buy (goods), and propose_plot_buy/propose_plot_sell. Always accept or reject pending proposals addressed to you. "
-        "Stay within cash. Use only the provided tools. Be concise."
+        base
+        + "You run a company. Goal: strongest firm. "
+        "Buy land with propose_plot_buy (cities own plots at start). "
+        "Build foundries, produce, trade on the market, bid on government contracts. "
+        "Use propose_sell/propose_buy for direct goods deals. "
+        "Accept or reject pending proposals addressed to you. "
+        "Build roads with build_road (side N/E/S/W, costs 1 steel)."
     )
 
 

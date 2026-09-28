@@ -72,9 +72,11 @@ class LLMClient:
             "messages": msgs,
             "tools": tools,
             "stream": False,
+            # Prefer tool calls when the model supports it (Ollama OpenAI-compat).
+            "tool_choice": "auto",
             "options": {
-                "temperature": 0.2,
-                "num_predict": 256,
+                "temperature": 0.1,
+                "num_predict": 192,
             },
         }
         data = json.dumps(payload).encode("utf-8")
@@ -115,4 +117,18 @@ def parse_tool_calls(message: dict[str, Any]) -> list[tuple[str, dict[str, Any],
         else:
             args = {}
         out.append((name, args, tc.get("id")))
+    # Fallback: some small models emit {"name": "...", "arguments": {...}} as content
+    if not out:
+        content = (message.get("content") or "").strip()
+        if content.startswith("{") and '"name"' in content:
+            try:
+                obj = json.loads(content)
+                name = obj.get("name") or (obj.get("function") or {}).get("name")
+                args = obj.get("arguments") or obj.get("parameters") or {}
+                if isinstance(args, str):
+                    args = json.loads(args) if args.strip() else {}
+                if name:
+                    out.append((str(name), dict(args) if isinstance(args, dict) else {}, None))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                pass
     return out
