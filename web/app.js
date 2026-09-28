@@ -663,7 +663,8 @@ function refreshLlmDebugPanel() {
 }
 
 async function loadLlmDebugTraces() {
-  const data = await fetch("/api/llm_debug").then((r) => r.json());
+  const res = await fetch("/api/llm_debug");
+  const data = await res.json();
   if (!data.ok) {
     llmDebugTrace.textContent = data.message || "failed to load";
     return;
@@ -681,7 +682,9 @@ async function loadLlmDebugTraces() {
   if (prev && [...llmDebugSelect.options].some((o) => o.value === prev)) {
     llmDebugSelect.value = prev;
   }
-  if (data.last_summary) llmDebugSummary.textContent = data.last_summary;
+  if (data.last_summary) {
+    llmDebugSummary.textContent = data.last_summary;
+  }
   const instr = data.instructions || [];
   if (instr.length) {
     llmDebugSummary.textContent =
@@ -703,7 +706,8 @@ btnLlmDebugView.addEventListener("click", async () => {
     llmDebugTrace.textContent = "(no trace selected)";
     return;
   }
-  const data = await fetch(`/api/llm_debug/trace?path=${encodeURIComponent(path)}`).then((r) => r.json());
+  const res = await fetch(`/api/llm_debug/trace?path=${encodeURIComponent(path)}`);
+  const data = await res.json();
   if (!data.ok) {
     llmDebugTrace.textContent = data.message || "failed";
     return;
