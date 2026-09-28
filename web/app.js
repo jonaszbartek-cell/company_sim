@@ -10,19 +10,23 @@ const selectedEl = document.getElementById("selected");
 const inventoryEl = document.getElementById("inventory");
 const marketEl = document.getElementById("market");
 const proposalsEl = document.getElementById("proposals");
+const plotsForSaleEl = document.getElementById("plots-for-sale");
+const govContractsEl = document.getElementById("gov-contracts");
 const aiLog = document.getElementById("ai-log");
 const aiMode = document.getElementById("ai-mode");
 const btnPause = document.getElementById("btn-pause");
 const btnPass = document.getElementById("btn-pass");
+const btnStatus = document.getElementById("btn-status");
 const btnPlotBuy = document.getElementById("btn-plot-buy");
 const btnPlotSell = document.getElementById("btn-plot-sell");
 const btnBuild = document.getElementById("btn-build");
 const btnProduce = document.getElementById("btn-produce");
+const btnSetMethod = document.getElementById("btn-set-method");
 const btnRoad = document.getElementById("btn-road");
 const btnMerge = document.getElementById("btn-merge");
 const roadSide = document.getElementById("road-side");
-const btnMktBuyIron = document.getElementById("btn-mkt-buy-iron");
-const btnMktSellSteel = document.getElementById("btn-mkt-sell-steel");
+const buildId = document.getElementById("build-id");
+const methodId = document.getElementById("method-id");
 const btnAccept = document.getElementById("btn-accept");
 const btnReject = document.getElementById("btn-reject");
 const proposalIdInput = document.getElementById("proposal-id");
@@ -36,18 +40,35 @@ const llmDebugSelect = document.getElementById("llm-debug-select");
 const llmDebugTrace = document.getElementById("llm-debug-trace");
 const btnLlmDebugRefresh = document.getElementById("btn-llm-debug-refresh");
 const btnLlmDebugView = document.getElementById("btn-llm-debug-view");
+const toolSelect = document.getElementById("tool-select");
+const toolDesc = document.getElementById("tool-desc");
+const toolArgs = document.getElementById("tool-args");
+const toolResult = document.getElementById("tool-result");
+const btnToolRun = document.getElementById("btn-tool-run");
+const btnToolAutofill = document.getElementById("btn-tool-autofill");
 
 let state = null;
 let selected = null;
 let lastOwnedClick = null;
 let cellSize = 20;
 let started = false;
+let playerTools = [];
+
+async function api(path, body) {
+  const opts = body === undefined
+    ? {}
+    : { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) };
+  const res = await fetch(path, opts);
+  return res.json();
+}
 
 function showGame() {
   started = true;
   setupEl.hidden = true;
   appEl.hidden = false;
   resize();
+  loadPlayerTools();
+  refreshContentSelects();
 }
 
 function showSetup(defaults) {
@@ -203,6 +224,50 @@ function draw() {
   }
 }
 
+function refreshContentSelects() {
+  if (!state || !state.content) return;
+  const buildings = state.content.buildings || [];
+  const methods = state.content.production_methods || state.content.production || [];
+  if (buildings.length) {
+    const prev = buildId.value;
+    buildId.innerHTML = buildings
+      .map((b) => `<option value="${b.id}">${b.id}</option>`)
+      .join("");
+    if (prev && [...buildId.options].some((o) => o.value === prev)) buildId.value = prev;
+  }
+  if (methods.length) {
+    const prev = methodId.value;
+    methodId.innerHTML = methods
+      .map((m) => `<option value="${m.id}">${m.id}</option>`)
+      .join("");
+    if (prev && [...methodId.options].some((o) => o.value === prev)) methodId.value = prev;
+  }
+}
+
+function refreshGovPanel() {
+  if (!state || !state.government_contracts) {
+    govContractsEl.textContent = "—";
+    return;
+  }
+  const contracts = state.government_contracts.contracts || state.government_contracts || [];
+  const list = Array.isArray(contracts) ? contracts : [];
+  if (!list.length) {
+    govContractsEl.textContent = "(none)";
+    return;
+  }
+  govContractsEl.textContent = list
+    .slice(0, 12)
+    .map((c) => {
+      const req = c.requirements
+        ? Object.entries(c.requirements).map(([k, v]) => `${v}x ${k}`).join(", ")
+        : "";
+      return `#${c.id} ${c.status || "?"} ${req} bids=${(c.bids || []).length}` +
+        (c.awarded_to ? ` → ${c.awarded_to}` : "") +
+        (c.winning_price != null ? ` @${c.winning_price}` : "");
+    })
+    .join("\n");
+}
+
 function refreshPanels() {
   if (!state) return;
   const acted = state.companies?.find((c) => c.id === state.player_company_id)?.acted_this_day;
@@ -214,11 +279,17 @@ function refreshPanels() {
   const player = state.companies.find((c) => c.id === state.player_company_id);
   hudCash.textContent = player ? `cash=${player.cash}` : "cash=—";
   inventoryEl.textContent = player ? JSON.stringify(player.inventory, null, 2) : "—";
+  refreshContentSelects();
   if (state.market) {
     const sells = (state.market.sell_listings || []).slice(0, 8);
-    marketEl.textContent = sells.length
-      ? sells.map((L) => `#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
-      : "(no sell listings)";
+    const buys = (state.market.buy_listings || []).slice(0, 6);
+    const sellTxt = sells.length
+      ? sells.map((L) => `S#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
+      : "(no sells)";
+    const buyTxt = buys.length
+      ? buys.map((L) => `B#${L.id} ${L.quantity}x ${L.item_id} @${L.price}`).join("\n")
+      : "(no buys)";
+    marketEl.textContent = `${sellTxt}\n---\n${buyTxt}`;
   }
   if (state.proposals) {
     const props = state.proposals.proposals || [];
@@ -233,6 +304,7 @@ function refreshPanels() {
           .join("\n")
       : "(none)";
   }
+  refreshGovPanel();
   refreshMailContacts();
   refreshMailLog();
   refreshLlmDebugPanel();
@@ -244,6 +316,7 @@ function refreshPanels() {
     btnPlotSell.disabled = true;
     btnBuild.disabled = true;
     btnProduce.disabled = true;
+    btnSetMethod.disabled = true;
     btnRoad.disabled = true;
     btnMerge.disabled = true;
     return;
@@ -265,6 +338,7 @@ function refreshPanels() {
   btnPlotSell.disabled = !canSell;
   btnBuild.disabled = !canBuild;
   btnProduce.disabled = !canProduce;
+  btnSetMethod.disabled = !canProduce;
   btnRoad.disabled = !canRoad;
   btnMerge.disabled = !canMerge;
 }
@@ -295,12 +369,7 @@ setupForm.addEventListener("submit", async (ev) => {
     map_size: Number(document.getElementById("setup-map").value),
     llm_debug: document.getElementById("setup-llm-debug").checked,
   };
-  const res = await fetch("/api/setup", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  const data = await res.json();
+  const data = await api("/api/setup", body);
   if (!data.ok) {
     setupError.textContent = data.message || "Setup failed";
     setupError.hidden = false;
@@ -338,11 +407,14 @@ canvas.addEventListener("click", (ev) => {
 
 btnPause.addEventListener("click", async () => {
   const paused = !(state && state.paused);
-  await fetch("/api/pause", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paused }),
-  });
+  await api("/api/pause", { paused });
+});
+
+btnStatus.addEventListener("click", async () => {
+  const data = await api("/api/player/action", { name: "get_status", arguments: {} });
+  toolResult.textContent = JSON.stringify(data, null, 2);
+  toolSelect.value = "get_status";
+  renderToolArgs();
 });
 
 btnPlotBuy.addEventListener("click", async () => {
@@ -352,12 +424,7 @@ btnPlotBuy.addEventListener("click", async () => {
   const price = Number(prompt("Offer price for this plot?", String(t.plot.value || 100)));
   if (!Number.isFinite(price) || price < 0) return;
   const to = `${t.plot.owner_kind}:${t.plot.owner_id}`;
-  const res = await fetch("/api/player/propose_plot_buy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, x: selected.x, y: selected.y, price }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/propose_plot_buy", { to, x: selected.x, y: selected.y, price });
   if (!data.ok) alert(data.message);
 });
 
@@ -367,113 +434,170 @@ btnPlotSell.addEventListener("click", async () => {
   if (!to) return;
   const price = Number(prompt("Ask price?", "150"));
   if (!Number.isFinite(price) || price < 0) return;
-  const res = await fetch("/api/player/propose_plot_sell", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, x: selected.x, y: selected.y, price }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/propose_plot_sell", { to, x: selected.x, y: selected.y, price });
   if (!data.ok) alert(data.message);
 });
 
 btnBuild.addEventListener("click", async () => {
   if (!selected) return;
-  const res = await fetch("/api/player/build", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...selected, building_id: "foundry" }),
+  const data = await api("/api/player/build", {
+    ...selected,
+    building_id: buildId.value || "foundry",
   });
-  const data = await res.json();
   if (!data.ok) alert(data.message);
+});
+
+btnSetMethod.addEventListener("click", async () => {
+  if (!selected) return;
+  const data = await api("/api/player/set_production_method", {
+    ...selected,
+    method_id: methodId.value || "make_steel",
+  });
+  if (!data.ok) alert(data.message);
+  else toolResult.textContent = data.message || "method set";
 });
 
 btnRoad.addEventListener("click", async () => {
   if (!selected) return;
-  const res = await fetch("/api/player/build_road", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ...selected, side: roadSide.value }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/build_road", { ...selected, side: roadSide.value });
   if (!data.ok) alert(data.message);
 });
 
 btnMerge.addEventListener("click", async () => {
   if (!selected || !lastOwnedClick) return;
-  const res = await fetch("/api/player/merge_plots", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      x1: lastOwnedClick.x,
-      y1: lastOwnedClick.y,
-      x2: selected.x,
-      y2: selected.y,
-    }),
+  const data = await api("/api/player/merge_plots", {
+    x1: lastOwnedClick.x,
+    y1: lastOwnedClick.y,
+    x2: selected.x,
+    y2: selected.y,
   });
-  const data = await res.json();
   if (!data.ok) alert(data.message);
   else lastOwnedClick = selected;
 });
 
 btnProduce.addEventListener("click", async () => {
   if (!selected) return;
-  const res = await fetch("/api/player/produce", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(selected),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/produce", selected);
   if (!data.ok) alert(data.message);
 });
 
 btnPass.addEventListener("click", async () => {
-  const res = await fetch("/api/player/pass", { method: "POST" });
-  const data = await res.json();
+  const data = await api("/api/player/pass", {});
   if (!data.ok) alert(data.message);
 });
 
 btnAccept.addEventListener("click", async () => {
   const proposal_id = Number(proposalIdInput.value);
   if (!proposal_id) return;
-  const res = await fetch("/api/player/accept_proposal", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ proposal_id }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/accept_proposal", { proposal_id });
   if (!data.ok) alert(data.message);
 });
 
 btnReject.addEventListener("click", async () => {
   const proposal_id = Number(proposalIdInput.value);
   if (!proposal_id) return;
-  const res = await fetch("/api/player/reject_proposal", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ proposal_id }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/reject_proposal", { proposal_id });
   if (!data.ok) alert(data.message);
 });
 
-btnMktBuyIron.addEventListener("click", async () => {
-  const res = await fetch("/api/player/market/buy", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_id: "iron", quantity: 1 }),
+document.getElementById("btn-propose-sell").addEventListener("click", async () => {
+  const data = await api("/api/player/propose_sell", {
+    to: document.getElementById("trade-to").value.trim(),
+    item_id: document.getElementById("trade-item").value.trim(),
+    quantity: Number(document.getElementById("trade-qty").value),
+    price: Number(document.getElementById("trade-price").value),
   });
-  const data = await res.json();
   if (!data.ok) alert(data.message);
 });
 
-btnMktSellSteel.addEventListener("click", async () => {
-  const res = await fetch("/api/player/market/sell", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ item_id: "steel", quantity: 1, price: 40 }),
+document.getElementById("btn-propose-buy").addEventListener("click", async () => {
+  const data = await api("/api/player/propose_buy", {
+    to: document.getElementById("trade-to").value.trim(),
+    item_id: document.getElementById("trade-item").value.trim(),
+    quantity: Number(document.getElementById("trade-qty").value),
+    price: Number(document.getElementById("trade-price").value),
   });
-  const data = await res.json();
   if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-mkt-buy").addEventListener("click", async () => {
+  const data = await api("/api/player/market/buy", {
+    item_id: document.getElementById("mkt-item").value.trim(),
+    quantity: Number(document.getElementById("mkt-qty").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-mkt-sell").addEventListener("click", async () => {
+  const data = await api("/api/player/market/sell", {
+    item_id: document.getElementById("mkt-item").value.trim(),
+    quantity: Number(document.getElementById("mkt-qty").value),
+    price: Number(document.getElementById("mkt-price").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-mkt-buy-order").addEventListener("click", async () => {
+  const data = await api("/api/player/market/buy_order", {
+    item_id: document.getElementById("mkt-item").value.trim(),
+    quantity: Number(document.getElementById("mkt-qty").value),
+    price: Number(document.getElementById("mkt-price").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-mkt-retract-sell").addEventListener("click", async () => {
+  const data = await api("/api/player/market/retract_sell", {
+    listing_id: Number(document.getElementById("mkt-listing").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-mkt-retract-buy").addEventListener("click", async () => {
+  const data = await api("/api/player/market/retract_buy", {
+    listing_id: Number(document.getElementById("mkt-listing").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-gov-refresh").addEventListener("click", async () => {
+  const data = await api("/api/government_contracts");
+  if (!data.ok) {
+    govContractsEl.textContent = data.message || "failed";
+    return;
+  }
+  const contracts = data.data?.contracts || data.data || [];
+  const list = Array.isArray(contracts) ? contracts : [];
+  govContractsEl.textContent = list.length
+    ? JSON.stringify(list, null, 2)
+    : "(none)";
+});
+
+document.getElementById("btn-gov-bid").addEventListener("click", async () => {
+  const data = await api("/api/player/bid_government_contract", {
+    contract_id: Number(document.getElementById("gov-id").value),
+    price: Number(document.getElementById("gov-price").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-gov-fulfill").addEventListener("click", async () => {
+  const data = await api("/api/player/fulfill_government_contract", {
+    contract_id: Number(document.getElementById("gov-id").value),
+  });
+  if (!data.ok) alert(data.message);
+});
+
+document.getElementById("btn-refresh-plots").addEventListener("click", async () => {
+  const data = await fetch("/api/plots_for_sale?limit=24").then((r) => r.json());
+  if (!data.ok) {
+    plotsForSaleEl.textContent = data.message || "failed";
+    return;
+  }
+  const plots = data.data?.plots || data.data || [];
+  plotsForSaleEl.textContent = Array.isArray(plots) && plots.length
+    ? plots.map((p) => `(${p.x},${p.y}) ${p.owner || p.owner_key || "?"} value=${p.value}`).join("\n")
+    : JSON.stringify(data, null, 2);
 });
 
 function refreshMailContacts() {
@@ -520,12 +644,7 @@ btnMailSend.addEventListener("click", async () => {
   const to = mailTo.value;
   const body = (mailBody.value || "").trim();
   if (!to || !body) return;
-  const res = await fetch("/api/player/message", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ to, body }),
-  });
-  const data = await res.json();
+  const data = await api("/api/player/message", { to, body });
   if (!data.ok) alert(data.message);
   else mailBody.value = "";
 });
@@ -544,8 +663,7 @@ function refreshLlmDebugPanel() {
 }
 
 async function loadLlmDebugTraces() {
-  const res = await fetch("/api/llm_debug");
-  const data = await res.json();
+  const data = await fetch("/api/llm_debug").then((r) => r.json());
   if (!data.ok) {
     llmDebugTrace.textContent = data.message || "failed to load";
     return;
@@ -563,9 +681,7 @@ async function loadLlmDebugTraces() {
   if (prev && [...llmDebugSelect.options].some((o) => o.value === prev)) {
     llmDebugSelect.value = prev;
   }
-  if (data.last_summary) {
-    llmDebugSummary.textContent = data.last_summary;
-  }
+  if (data.last_summary) llmDebugSummary.textContent = data.last_summary;
   const instr = data.instructions || [];
   if (instr.length) {
     llmDebugSummary.textContent =
@@ -587,13 +703,143 @@ btnLlmDebugView.addEventListener("click", async () => {
     llmDebugTrace.textContent = "(no trace selected)";
     return;
   }
-  const res = await fetch(`/api/llm_debug/trace?path=${encodeURIComponent(path)}`);
-  const data = await res.json();
+  const data = await fetch(`/api/llm_debug/trace?path=${encodeURIComponent(path)}`).then((r) => r.json());
   if (!data.ok) {
     llmDebugTrace.textContent = data.message || "failed";
     return;
   }
   llmDebugTrace.textContent = data.text || "(empty)";
+});
+
+async function loadPlayerTools() {
+  try {
+    const data = await fetch("/api/player/tools").then((r) => r.json());
+    playerTools = data.tools || [];
+    const prev = toolSelect.value;
+    toolSelect.innerHTML = playerTools
+      .map((t) => `<option value="${t.name}">${t.name}</option>`)
+      .join("");
+    if (prev && playerTools.some((t) => t.name === prev)) toolSelect.value = prev;
+    renderToolArgs();
+  } catch (e) {
+    toolDesc.textContent = String(e);
+  }
+}
+
+function currentTool() {
+  return playerTools.find((t) => t.name === toolSelect.value) || null;
+}
+
+function renderToolArgs() {
+  const tool = currentTool();
+  toolArgs.innerHTML = "";
+  if (!tool) {
+    toolDesc.textContent = "—";
+    return;
+  }
+  toolDesc.textContent = tool.description || "";
+  const params = tool.parameters || {};
+  const required = new Set(tool.required || []);
+  for (const [key, schema] of Object.entries(params)) {
+    const label = document.createElement("label");
+    const req = required.has(key) ? " *" : "";
+    label.textContent = `${key}${req}`;
+    const type = schema.type || "string";
+    let input;
+    if (type === "object") {
+      input = document.createElement("textarea");
+      input.rows = 2;
+      input.placeholder = '{}';
+      input.dataset.json = "1";
+    } else {
+      input = document.createElement("input");
+      input.type = type === "integer" || type === "number" ? "number" : "text";
+      if (schema.enum) {
+        input = document.createElement("select");
+        for (const v of schema.enum) {
+          const opt = document.createElement("option");
+          opt.value = v;
+          opt.textContent = v;
+          input.appendChild(opt);
+        }
+      }
+    }
+    input.dataset.key = key;
+    input.dataset.type = type;
+    if (schema.description) input.title = schema.description;
+    label.appendChild(input);
+    toolArgs.appendChild(label);
+  }
+}
+
+function collectToolArguments() {
+  const args = {};
+  for (const el of toolArgs.querySelectorAll("[data-key]")) {
+    const key = el.dataset.key;
+    const type = el.dataset.type;
+    let raw = el.value;
+    if (raw === "" || raw == null) continue;
+    if (el.dataset.json === "1") {
+      try {
+        args[key] = JSON.parse(raw);
+      } catch {
+        throw new Error(`Invalid JSON for ${key}`);
+      }
+    } else if (type === "integer") {
+      args[key] = Number.parseInt(raw, 10);
+    } else if (type === "number") {
+      args[key] = Number(raw);
+    } else {
+      args[key] = raw;
+    }
+  }
+  return args;
+}
+
+function autofillToolArgs() {
+  for (const el of toolArgs.querySelectorAll("[data-key]")) {
+    const key = el.dataset.key;
+    if ((key === "x" || key === "x1" || key === "x2") && selected) {
+      if (key === "x2" && lastOwnedClick) el.value = lastOwnedClick.x;
+      else if (key === "x1" && lastOwnedClick) el.value = lastOwnedClick.x;
+      else if (key === "x") el.value = selected.x;
+      else if (key === "x1") el.value = selected.x;
+    }
+    if ((key === "y" || key === "y1" || key === "y2") && selected) {
+      if (key === "y2" && lastOwnedClick) el.value = lastOwnedClick.y;
+      else if (key === "y1" && lastOwnedClick) el.value = lastOwnedClick.y;
+      else if (key === "y") el.value = selected.y;
+      else if (key === "y1") el.value = selected.y;
+    }
+    if (key === "x2" && selected) el.value = selected.x;
+    if (key === "y2" && selected) el.value = selected.y;
+    if (key === "side") el.value = roadSide.value;
+    if (key === "building_id") el.value = buildId.value;
+    if (key === "method_id") el.value = methodId.value;
+    if (key === "item_id" && !el.value) el.value = document.getElementById("mkt-item").value || "iron";
+    if (key === "to" && selected) {
+      const t = tileAt(selected.x, selected.y);
+      if (t?.plot?.owner_id && !isPlayerOwned(t.plot)) {
+        el.value = `${t.plot.owner_kind}:${t.plot.owner_id}`;
+      }
+    }
+  }
+}
+
+toolSelect.addEventListener("change", renderToolArgs);
+btnToolAutofill.addEventListener("click", autofillToolArgs);
+btnToolRun.addEventListener("click", async () => {
+  const name = toolSelect.value;
+  if (!name) return;
+  try {
+    const arguments_ = collectToolArguments();
+    const data = await api("/api/player/action", { name, arguments: arguments_ });
+    toolResult.textContent = JSON.stringify(data, null, 2);
+    if (!data.ok) alert(data.message || "tool failed");
+  } catch (e) {
+    toolResult.textContent = String(e);
+    alert(String(e));
+  }
 });
 
 function connect() {

@@ -475,6 +475,45 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
 ]
 
 
+# City-only tools — player company cannot run these (cities use them via LLM).
+CITY_ONLY_TOOLS = frozenset(
+    {
+        "post_government_contract",
+        "award_government_contract",
+        "cancel_government_contract",
+    }
+)
+
+# Meta tools for LLM session control — not meaningful as player UI actions.
+PLAYER_EXCLUDED_TOOLS = frozenset({"done"}) | CITY_ONLY_TOOLS
+
+
+def tool_name(defn: dict[str, Any]) -> str:
+    return str(defn["function"]["name"])
+
+
+def player_company_tool_definitions() -> list[dict[str, Any]]:
+    """Tool schemas a player company can run (same set as company AI agents)."""
+    return [d for d in TOOL_DEFINITIONS if tool_name(d) not in PLAYER_EXCLUDED_TOOLS]
+
+
+def player_tool_catalog() -> list[dict[str, Any]]:
+    """Flattened catalog for the web UI / API."""
+    out: list[dict[str, Any]] = []
+    for defn in player_company_tool_definitions():
+        fn = defn["function"]
+        params = fn.get("parameters") or {}
+        out.append(
+            {
+                "name": fn["name"],
+                "description": fn.get("description", ""),
+                "parameters": params.get("properties") or {},
+                "required": list(params.get("required") or []),
+            }
+        )
+    return out
+
+
 def build_actor_context(world: World, actor: Actor) -> str:
     """Compact extra hint (file bundle already has full agent/world/market)."""
     owned = world.owned_plots(actor.kind, actor.id)

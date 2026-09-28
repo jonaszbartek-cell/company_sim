@@ -36,6 +36,7 @@
       <div id="hud-cash" class="hud">cash=—</div>
       <button id="btn-pause" type="button">Pause</button>
       <button id="btn-pass" type="button">Pass day</button>
+      <button id="btn-status" type="button">Status</button>
     </header>
     <main>
       <canvas id="map" width="960" height="720"></canvas>
@@ -47,8 +48,21 @@
           <button id="btn-plot-sell" type="button" disabled>Propose sell plot</button>
         </div>
         <div class="row">
-          <button id="btn-build" type="button" disabled>Build foundry</button>
+          <label class="inline">Building
+            <select id="build-id">
+              <option value="foundry">foundry</option>
+            </select>
+          </label>
+          <button id="btn-build" type="button" disabled>Build</button>
           <button id="btn-produce" type="button" disabled>Produce</button>
+        </div>
+        <div class="row">
+          <label class="inline">Method
+            <select id="method-id">
+              <option value="make_steel">make_steel</option>
+            </select>
+          </label>
+          <button id="btn-set-method" type="button" disabled>Set method</button>
         </div>
         <div class="row">
           <label class="inline">Road side
@@ -62,6 +76,11 @@
           <button id="btn-road" type="button" disabled>Build road</button>
           <button id="btn-merge" type="button" disabled>Combine</button>
         </div>
+
+        <h2>Plots for sale</h2>
+        <pre id="plots-for-sale">—</pre>
+        <button id="btn-refresh-plots" type="button">Refresh plots</button>
+
         <h2>Proposals</h2>
         <pre id="proposals">—</pre>
         <div class="row">
@@ -69,19 +88,65 @@
           <button id="btn-accept" type="button">Accept</button>
           <button id="btn-reject" type="button">Reject</button>
         </div>
+        <div class="form-grid">
+          <input id="trade-to" type="text" placeholder="to (ai_1 / city:city_a)" />
+          <input id="trade-item" type="text" placeholder="item" value="iron" />
+          <input id="trade-qty" type="number" min="1" value="1" />
+          <input id="trade-price" type="number" min="0" value="10" />
+        </div>
+        <div class="row">
+          <button id="btn-propose-sell" type="button">Propose sell</button>
+          <button id="btn-propose-buy" type="button">Propose buy</button>
+        </div>
+
         <h2>Inventory</h2>
         <pre id="inventory">—</pre>
+
         <h2>Market</h2>
         <pre id="market">—</pre>
-        <div class="row">
-          <button id="btn-mkt-buy-iron" type="button">Buy 1 iron</button>
-          <button id="btn-mkt-sell-steel" type="button">Sell 1 steel @40</button>
+        <div class="form-grid">
+          <input id="mkt-item" type="text" placeholder="item" value="iron" />
+          <input id="mkt-qty" type="number" min="1" value="1" />
+          <input id="mkt-price" type="number" min="0" value="10" />
+          <input id="mkt-listing" type="number" min="1" placeholder="listing #" />
         </div>
+        <div class="row wrap">
+          <button id="btn-mkt-buy" type="button">Buy now</button>
+          <button id="btn-mkt-sell" type="button">Post sell</button>
+          <button id="btn-mkt-buy-order" type="button">Post buy</button>
+          <button id="btn-mkt-retract-sell" type="button">Retract sell</button>
+          <button id="btn-mkt-retract-buy" type="button">Retract buy</button>
+        </div>
+
+        <h2>Gov contracts</h2>
+        <pre id="gov-contracts">—</pre>
+        <div class="form-grid">
+          <input id="gov-id" type="number" min="1" placeholder="contract #" />
+          <input id="gov-price" type="number" min="0" value="100" placeholder="bid price" />
+        </div>
+        <div class="row">
+          <button id="btn-gov-refresh" type="button">Refresh</button>
+          <button id="btn-gov-bid" type="button">Bid</button>
+          <button id="btn-gov-fulfill" type="button">Fulfill</button>
+        </div>
+
         <h2>Mail</h2>
         <select id="mail-to"></select>
         <textarea id="mail-body" rows="2" placeholder="Message…"></textarea>
         <button id="btn-mail-send" type="button">Send</button>
         <pre id="mail-log">—</pre>
+
+        <h2>Agent tools</h2>
+        <p class="hint">Same tools company AI agents use. Pick one, fill args, run.</p>
+        <select id="tool-select"></select>
+        <p id="tool-desc" class="hint">—</p>
+        <div id="tool-args" class="tool-args"></div>
+        <div class="row">
+          <button id="btn-tool-run" type="button">Run tool</button>
+          <button id="btn-tool-autofill" type="button">Fill from selection</button>
+        </div>
+        <pre id="tool-result">—</pre>
+
         <h2>AI</h2>
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
@@ -97,7 +162,7 @@
         </div>
         <p class="hint">
           Roads are edges on owned plots (N/E/S/W). Cost: 1 steel (consumed). Combine adjacent owned plots only with no road between.
-          Plot buy/sell are direct proposals — accept or reject.
+          Plot buy/sell are direct proposals — accept or reject. City-only gov tools (post/award/cancel) are not available to the player company.
         </p>
       </aside>
     </main>
