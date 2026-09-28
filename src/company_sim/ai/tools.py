@@ -264,6 +264,88 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "post_government_contract",
+            "description": "CITY only. Post a government contract listing required resources; all companies may bid.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "requirements": {
+                        "type": "object",
+                        "description": "Map of item_id → quantity, e.g. {\"iron\": 5, \"coal\": 3}",
+                        "additionalProperties": {"type": "integer"},
+                    }
+                },
+                "required": ["requirements"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "bid_government_contract",
+            "description": "COMPANY only. Bid a total price to fulfill a city's open government contract.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "contract_id": {"type": "integer"},
+                    "price": {"type": "integer", "description": "Total cash for the whole basket"},
+                },
+                "required": ["contract_id", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "award_government_contract",
+            "description": "CITY only. Close bidding and award to the lowest bid; city cash is escrowed.",
+            "parameters": {
+                "type": "object",
+                "properties": {"contract_id": {"type": "integer"}},
+                "required": ["contract_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fulfill_government_contract",
+            "description": "COMPANY only. Deliver all required goods for an awarded contract; receive payment.",
+            "parameters": {
+                "type": "object",
+                "properties": {"contract_id": {"type": "integer"}},
+                "required": ["contract_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_government_contracts",
+            "description": "List open/awarded government contracts.",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_government_contract",
+            "description": "CITY only. Cancel an open or awarded (unfulfilled) contract; refund escrow.",
+            "parameters": {
+                "type": "object",
+                "properties": {"contract_id": {"type": "integer"}},
+                "required": ["contract_id"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "build_road",
             "description": "Build a road on an empty or unowned plot cell (costs cash).",
             "parameters": {
@@ -386,14 +468,16 @@ def system_prompt_for(actor: Actor) -> str:
     if actor.kind == "city":
         return (
             "You administer a city of normal roads and plots. "
-            "Claim municipal plots, build workshops, post market orders, keep territory healthy. "
-            "You may send_message to companies (including the player) to coordinate. "
+            "You CANNOT use the market. To buy goods, post_government_contract with required "
+            "resources, then award_government_contract (lowest company bid wins). "
+            "Claim plots, build workshops, keep territory healthy. "
             "Stay within cash. Use only the provided tools. Be concise."
         )
     return (
         "You run a company. Become the strongest firm: "
-        "buy plots, build foundries, buy inputs from the market, produce steel, sell at profit. "
-        "You may send_message to other companies, the city, or the player to negotiate. "
+        "buy plots, build foundries, trade on the market, and bid on city government contracts. "
+        "When awarded a contract, gather the goods and fulfill_government_contract to get paid. "
+        "You may send_message and use direct propose_sell/propose_buy with other companies. "
         "Stay within cash. Use only the provided tools. Be concise."
     )
 
@@ -567,6 +651,33 @@ class ToolExecutor:
 
         if name == "reject_proposal":
             r = self.world.reject_proposal(kind, aid, int(args["proposal_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "post_government_contract":
+            reqs = args.get("requirements") or {}
+            if not isinstance(reqs, dict):
+                return {"ok": False, "message": "requirements must be an object"}
+            r = self.world.post_government_contract(kind, aid, {str(k): int(v) for k, v in reqs.items()})
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "bid_government_contract":
+            r = self.world.bid_government_contract(kind, aid, int(args["contract_id"]), int(args["price"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "award_government_contract":
+            r = self.world.award_government_contract(kind, aid, int(args["contract_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "fulfill_government_contract":
+            r = self.world.fulfill_government_contract(kind, aid, int(args["contract_id"]))
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "list_government_contracts":
+            r = self.world.list_government_contracts(kind, aid)
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "cancel_government_contract":
+            r = self.world.cancel_government_contract(kind, aid, int(args["contract_id"]))
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_road":

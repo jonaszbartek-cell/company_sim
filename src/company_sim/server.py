@@ -82,6 +82,19 @@ class ProposalIdBody(BaseModel):
     proposal_id: int
 
 
+class GovContractBody(BaseModel):
+    requirements: dict[str, int]
+
+
+class GovBidBody(BaseModel):
+    contract_id: int
+    price: int
+
+
+class GovContractIdBody(BaseModel):
+    contract_id: int
+
+
 def create_app() -> FastAPI:
     world = World.new_game(WorldConfig())
     scheduler = AIScheduler()
@@ -263,6 +276,30 @@ def create_app() -> FastAPI:
     def get_proposals() -> dict[str, Any]:
         try:
             result = world.list_proposals("company", _player())
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.get("/api/government_contracts")
+    def get_gov_contracts() -> dict[str, Any]:
+        try:
+            result = world.list_government_contracts("company", _player())
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/bid_government_contract")
+    def bid_gov(body: GovBidBody) -> dict[str, Any]:
+        try:
+            result = world.bid_government_contract("company", _player(), body.contract_id, body.price)
+            return {"ok": result.ok, "message": result.message, "data": result.data}
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message}
+
+    @app.post("/api/player/fulfill_government_contract")
+    def fulfill_gov(body: GovContractIdBody) -> dict[str, Any]:
+        try:
+            result = world.fulfill_government_contract("company", _player(), body.contract_id)
             return {"ok": result.ok, "message": result.message, "data": result.data}
         except ActionError as exc:
             return {"ok": False, "message": exc.message}

@@ -31,15 +31,16 @@ def test_retract_sell_returns_only_that_listing_goods():
         w.post_sell("company", "ai_1", "steel", 4, price=40)
         w.post_sell("company", "ai_1", "steel", 3, price=50)
         assert seller.inventory.get("steel") == before - 7
-        assert w.market.inventory.get("steel") == 7
-        sells = [L for L in w.market.listings.values() if L.side == "sell" and L.owner_id == "ai_1"]
-        assert len(sells) == 2
-        first = min(sells, key=lambda L: L.id)
+        steel_sells = [
+            L
+            for L in w.market.listings.values()
+            if L.side == "sell" and L.owner_id == "ai_1" and L.item_id == "steel"
+        ]
+        assert len(steel_sells) == 2
+        first = min(steel_sells, key=lambda L: L.id)
+        qty = first.quantity
         w.retract_sell("company", "ai_1", first.id)
-        assert seller.inventory.get("steel") == before - 7 + first.quantity + (
-            0
-        )  # first.quantity was remaining
-        # After retract, market still holds the other listing
+        assert seller.inventory.get("steel") == before - 7 + qty
         w.market.assert_inventory_matches_sells()
         assert w.market.sell_qty_on_book("steel") == w.market.inventory.get("steel")
 

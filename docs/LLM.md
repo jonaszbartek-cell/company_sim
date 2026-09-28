@@ -58,6 +58,11 @@ Without `COMPANY_SIM_LLM=1`, AI uses heuristics (game still runs).
 | `set_production_method` | Choose recipe |
 | `build_road` / `merge_plots` | Map |
 | `list_contacts` / `read_mail` / `send_message` | Mail |
+| `post_government_contract` / `award` / `cancel` | CITY procurement |
+| `bid_government_contract` / `fulfill_government_contract` | COMPANY fulfillment |
+| `list_government_contracts` | View open/awarded contracts |
 | `pass_turn` / `done` | End turn |
+
+**Cities cannot use the market** — only government contracts for goods.
 
 All tools go through `ToolExecutor` → World actions (same validation as the player UI).

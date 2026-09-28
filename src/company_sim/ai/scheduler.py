@@ -177,6 +177,32 @@ class AIScheduler:
         return candidates
 
     def _heuristic_city(self, world: World, city: City) -> None:
+        # Award any open contract that already has bids
+        for c in world.gov_contracts.open_contracts():
+            if c.city_id == city.id and c.bids:
+                try:
+                    world.award_government_contract("city", city.id, c.id)
+                    self.last_thought = f"{city.name}: awarded gov contract #{c.id}"
+                    return
+                except Exception as exc:  # noqa: BLE001
+                    self.last_thought = f"{city.name}: award failed ({exc})"
+                    return
+
+        # Post a small procurement if none open for this city
+        mine_open = [c for c in world.gov_contracts.open_contracts() if c.city_id == city.id]
+        mine_awarded = [
+            c for c in world.gov_contracts.active() if c.city_id == city.id and c.status == "awarded"
+        ]
+        if not mine_open and not mine_awarded and city.cash >= 80:
+            try:
+                world.post_government_contract(
+                    "city", city.id, {"iron": 2, "coal": 2, "energy": 1}
+                )
+                self.last_thought = f"{city.name}: posted government contract"
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.last_thought = f"{city.name}: contract failed ({exc})"
+
         owned = world.owned_plots("city", city.id)
         for t in owned:
             if t.plot and t.plot.building is None and city.cash >= 200:
@@ -188,7 +214,6 @@ class AIScheduler:
                     self.last_thought = f"{city.name}: build failed ({exc})"
                     return
 
-        # Prefer selling surplus steel / buying missing inputs later — for now claim land
         for t in world.grid.tiles:
             if (
                 t.kind.value == "plot"
@@ -221,6 +246,40 @@ class AIScheduler:
     def _heuristic_company(self, world: World, company: Actor) -> None:
         owned = world.owned_plots("company", company.id)
 
+        # Fulfill awarded government contracts if possible
+        for c in world.gov_contracts.awarded_for_company(company.id):
+            try:
+                world.fulfill_government_contract("company", company.id, c.id)
+                self.last_thought = f"{company.name}: fulfilled gov contract #{c.id}"
+                return
+            except Exception:
+                # Try to buy missing inputs from market first
+                for item_id, need in c.requirements.items():
+                    have = company.inventory.get(item_id)
+                    if have < need:
+                        try:
+                            world.buy_from_market("company", company.id, item_id, need - have)
+                            self.last_thought = f"{company.name}: buying {item_id} for contract"
+                            return
+                        except Exception:
+                            continue
+
+        # Bid on open government contracts
+        for c in world.gov_contracts.open_contracts():
+            if company.id in c.bids:
+                continue
+            # Simple bid: 12 per unit
+            total_units = sum(c.requirements.values())
+            price = max(10, total_units * 12)
+            if company.cash < 0:
+                continue
+            try:
+                world.bid_government_contract("company", company.id, c.id, price)
+                self.last_thought = f"{company.name}: bid {price} on gov #{c.id}"
+                return
+            except Exception:
+                continue
+
         # Occasionally ping the player / a rival (AGENT↔USER / AGENT↔AGENT)
         if world.day <= 2 or world.tick_index % 17 == 0:
             try:
@@ -232,7 +291,6 @@ class AIScheduler:
                     f"{company.name}: open to trade steel/inputs on day {world.day}.",
                 )
                 self.last_thought = f"{company.name}: messaged {target}"
-                # Fall through to also take an economic action this turn
             except Exception:
                 pass
 
