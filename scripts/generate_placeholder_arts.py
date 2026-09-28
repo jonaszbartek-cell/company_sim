@@ -26,6 +26,7 @@ CAT_COLORS = {
 }
 
 BLD_COLORS = {
+    "city_hall": ("#4a5568", "#cbd5e1"),
     "mine": ("#bc6c25", "#f4a261"),
     "rig": ("#264653", "#2a9d8f"),
     "foundry": ("#9b2226", "#ee9b00"),

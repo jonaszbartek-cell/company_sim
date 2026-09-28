@@ -9,9 +9,22 @@
 # Plot rules:
 #   Mine → specialized_mine only (method locked at build)
 #   Rig  → specialized_well only (method locked at build; oil/gas/water via method)
+#   City Hall → ceremonial / admin (no production); every city starts with one
 #   All other factories → standard + both specialized types
 
 buildings:
+  - id: city_hall
+    name: City Hall
+    description: Civic landmark. Does nothing — placed at each city's territory center at game start.
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    locks_production_method: false
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
   - id: mine
     name: Mine
     description: Extracts ores and minerals (no recipe inputs)

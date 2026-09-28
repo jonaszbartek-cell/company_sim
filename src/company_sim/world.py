@@ -169,6 +169,9 @@ class World:
                 }
             )
 
+        # Each city gets a free City Hall near the middle of its territory
+        world._place_starting_city_halls()
+
         # Player + AI companies start with NO plots
         player = Company(
             id="player",
@@ -209,6 +212,47 @@ class World:
         if world.llm_debug_log is not None:
             world.llm_debug_log.ensure_dir()
         return world
+
+    def _place_starting_city_halls(self) -> None:
+        """Place a free inert City Hall near each city's territory center."""
+        for city in self.grid.cities.values():
+            site = self._city_hall_site(city.id, city.center_x, city.center_y)
+            if site is None:
+                continue
+            x, y = site
+            building = Building(
+                building_id="city_hall",
+                owner_kind="city",
+                owner_id=city.id,
+                production_method_id=None,
+                production_method_locked=False,
+                status="idle",
+                storage=Inventory(),
+                anchor_x=x,
+                anchor_y=y,
+            )
+            building.materialize_storage(
+                self.content.storage_capacity_for_building("city_hall")
+            )
+            self.grid.place_building_on_group(x, y, building)
+
+    def _city_hall_site(
+        self, city_id: str, center_x: int, center_y: int
+    ) -> tuple[int, int] | None:
+        """Nearest empty city-owned plot to the territory center (prefer the seed)."""
+        candidates: list[tuple[int, int, int]] = []
+        for tile in self.grid.tiles:
+            if not tile.plot or not tile.plot.owned_by("city", city_id):
+                continue
+            if tile.plot.building is not None:
+                continue
+            dist = abs(tile.x - center_x) + abs(tile.y - center_y)
+            candidates.append((dist, tile.x, tile.y))
+        if not candidates:
+            return None
+        candidates.sort()
+        _, x, y = candidates[0]
+        return x, y
 
     def mail(self) -> MailboxStore:
         if self.mailboxes is None:
