@@ -54,6 +54,12 @@ class ProduceBody(BaseModel):
     y: int
 
 
+class SetMethodBody(BaseModel):
+    x: int
+    y: int
+    method_id: str
+
+
 class MarketOrderBody(BaseModel):
     item_id: str
     quantity: int
@@ -303,6 +309,58 @@ def create_app() -> FastAPI:
         try:
             result = _require_world().produce("company", _player(), body.x, body.y)
             return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.post("/api/player/set_production_method")
+    def set_production_method(body: SetMethodBody) -> dict[str, Any]:
+        try:
+            result = _require_world().set_production_method(
+                "company", _player(), body.x, body.y, body.method_id
+            )
+            return _ok(result)
+        except ActionError as exc:
+            return _err(exc)
+
+    @app.get("/api/plots_for_sale")
+    def plots_for_sale(limit: int = 8) -> dict[str, Any]:
+        """Mirror of agent list_plots_for_sale — plots owned by others, cheapest first."""
+        try:
+            w = _require_world()
+            pid = _player()
+            limit = max(1, min(int(limit), 64))
+            candidates = []
+            for t in w.grid.tiles:
+                if not t.plot or not t.plot.owner_id:
+                    continue
+                if t.plot.owned_by("company", pid):
+                    continue
+                if t.plot.reserved_proposal_id is not None:
+                    continue
+                candidates.append(t)
+            candidates.sort(key=lambda t: t.plot.value if t.plot else 9999)
+            return {
+                "ok": True,
+                "message": "plots",
+                "data": {
+                    "plots": [
+                        {
+                            "x": t.x,
+                            "y": t.y,
+                            "value": t.plot.value if t.plot else None,
+                            "plot_type": t.plot.plot_type.value if t.plot else None,
+                            "owner": f"{t.plot.owner_kind}:{t.plot.owner_id}" if t.plot else None,
+                            "city_id": t.city_id,
+                            "roads": t.plot.roads if t.plot else None,
+                            "combined": {s: pid_ for s, pid_ in t.plot.combined.items() if pid_}
+                            if t.plot
+                            else None,
+                        }
+                        for t in candidates[:limit]
+                    ],
+                    "road_build_steel": w.config.road_build_steel,
+                },
+            }
         except ActionError as exc:
             return _err(exc)
 

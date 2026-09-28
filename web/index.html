@@ -40,14 +40,35 @@
     <main>
       <canvas id="map" width="960" height="720"></canvas>
       <aside>
+        <p id="action-msg" class="action-msg" hidden></p>
+
         <h2>Selected</h2>
         <pre id="selected">Click a plot</pre>
+        <div class="row">
+          <label class="inline grow">Offer / ask
+            <input id="plot-price" type="number" min="0" value="100" />
+          </label>
+          <label class="inline grow">Sell to
+            <select id="plot-sell-to"></select>
+          </label>
+        </div>
         <div class="row">
           <button id="btn-plot-buy" type="button" disabled>Propose buy plot</button>
           <button id="btn-plot-sell" type="button" disabled>Propose sell plot</button>
         </div>
         <div class="row">
-          <button id="btn-build" type="button" disabled>Build foundry</button>
+          <label class="inline grow">Building
+            <select id="building-id"></select>
+          </label>
+          <button id="btn-build" type="button" disabled>Build</button>
+        </div>
+        <div class="row">
+          <label class="inline grow">Method
+            <select id="method-id"></select>
+          </label>
+          <button id="btn-set-method" type="button" disabled>Set method</button>
+        </div>
+        <div class="row">
           <button id="btn-produce" type="button" disabled>Produce</button>
         </div>
         <div class="row">
@@ -62,26 +83,80 @@
           <button id="btn-road" type="button" disabled>Build road</button>
           <button id="btn-merge" type="button" disabled>Combine</button>
         </div>
-        <h2>Proposals</h2>
-        <pre id="proposals">—</pre>
+
+        <h2>Plots for sale</h2>
+        <pre id="plots-for-sale">—</pre>
         <div class="row">
-          <input id="proposal-id" type="number" min="1" placeholder="#" style="width:4rem" />
-          <button id="btn-accept" type="button">Accept</button>
-          <button id="btn-reject" type="button">Reject</button>
+          <button id="btn-refresh-plots" type="button">Refresh cheapest</button>
         </div>
+
+        <h2>Proposals</h2>
+        <div id="proposals" class="list-panel">—</div>
+
+        <h2>Direct goods trade</h2>
+        <div class="row">
+          <label class="inline grow">To
+            <select id="goods-to"></select>
+          </label>
+          <label class="inline grow">Item
+            <select id="goods-item"></select>
+          </label>
+        </div>
+        <div class="row">
+          <label class="inline grow">Qty
+            <input id="goods-qty" type="number" min="1" value="1" />
+          </label>
+          <label class="inline grow">Price/u
+            <input id="goods-price" type="number" min="0" value="10" />
+          </label>
+        </div>
+        <div class="row">
+          <button id="btn-propose-sell" type="button">Propose sell</button>
+          <button id="btn-propose-buy" type="button">Propose buy</button>
+        </div>
+
         <h2>Inventory</h2>
         <pre id="inventory">—</pre>
+
         <h2>Market</h2>
         <pre id="market">—</pre>
         <div class="row">
-          <button id="btn-mkt-buy-iron" type="button">Buy 1 iron</button>
-          <button id="btn-mkt-sell-steel" type="button">Sell 1 steel @40</button>
+          <label class="inline grow">Item
+            <select id="mkt-item"></select>
+          </label>
+          <label class="inline grow">Qty
+            <input id="mkt-qty" type="number" min="1" value="1" />
+          </label>
+          <label class="inline grow">Price
+            <input id="mkt-price" type="number" min="0" value="10" />
+          </label>
         </div>
+        <div class="row">
+          <button id="btn-mkt-buy" type="button">Buy now</button>
+          <button id="btn-mkt-sell" type="button">Post sell</button>
+          <button id="btn-mkt-buy-order" type="button">Post buy order</button>
+        </div>
+        <div class="row">
+          <input id="mkt-listing-id" type="number" min="1" placeholder="listing #" />
+          <button id="btn-mkt-retract-sell" type="button">Retract sell</button>
+          <button id="btn-mkt-retract-buy" type="button">Retract buy</button>
+        </div>
+
+        <h2>Government contracts</h2>
+        <div id="gov-contracts" class="list-panel">—</div>
+        <div class="row">
+          <input id="gov-id" type="number" min="1" placeholder="contract #" />
+          <input id="gov-bid" type="number" min="0" placeholder="bid $" value="30" />
+          <button id="btn-gov-bid" type="button">Bid</button>
+          <button id="btn-gov-fulfill" type="button">Fulfill</button>
+        </div>
+
         <h2>Mail</h2>
         <select id="mail-to"></select>
         <textarea id="mail-body" rows="2" placeholder="Message…"></textarea>
         <button id="btn-mail-send" type="button">Send</button>
         <pre id="mail-log">—</pre>
+
         <h2>AI</h2>
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
@@ -96,8 +171,9 @@
           <pre id="llm-debug-trace">—</pre>
         </div>
         <p class="hint">
-          Roads are edges on owned plots (N/E/S/W). Cost: 1 steel (consumed). Combine adjacent owned plots only with no road between.
-          Plot buy/sell are direct proposals — accept or reject.
+          Player UI mirrors company agent tools: land proposals, build/produce/method, roads, combine,
+          market (buy/sell/orders/retract), direct goods proposals, gov bid/fulfill, mail, pass.
+          City-only tools (post/award/cancel contracts) are not available to the player company.
         </p>
       </aside>
     </main>

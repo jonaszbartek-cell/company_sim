@@ -75,9 +75,14 @@ def _world(
 # AGENT LLM BRIDGE
 #   - every tool in TOOL_DEFINITIONS dispatches
 #
-# PLAYER HTTP API / UI surfaces
-#   - setup GET/POST, state, pause, build, produce, road, merge,
-#     market, proposals, gov contracts, mail, pass
+# PLAYER HTTP API / UI surfaces (parity with company agent tools)
+#   - setup GET/POST, state, pause
+#   - build, set_production_method, produce, road, merge
+#   - plots_for_sale (list_plots_for_sale)
+#   - market sell/buy/buy_order/retract_sell/retract_buy
+#   - propose_sell/buy + propose_plot_sell/buy + accept/reject/list
+#   - gov bid/fulfill/list (city post/award/cancel stay city-only)
+#   - mail contacts/read/send, pass
 #
 
 
@@ -515,7 +520,16 @@ def test_player_http_api_setup_and_core_routes():
         "/api/player/build", json={"x": 1, "y": 1, "building_id": "foundry"}
     ).json()["ok"]
     world.companies["player"].acted_this_day = False
+    assert client.post(
+        "/api/player/set_production_method",
+        json={"x": 1, "y": 1, "method_id": "make_steel"},
+    ).json()["ok"]
+    world.companies["player"].acted_this_day = False
     assert client.post("/api/player/produce", json={"x": 1, "y": 1}).json()["ok"]
+    world.companies["player"].acted_this_day = False
+    plots = client.get("/api/plots_for_sale?limit=5").json()
+    assert plots["ok"] is True
+    assert "plots" in plots["data"]
     world.companies["player"].acted_this_day = False
     assert client.post(
         "/api/player/build_road", json={"x": 1, "y": 1, "side": "S"}
