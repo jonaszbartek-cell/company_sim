@@ -127,9 +127,14 @@ def load_default_catalog() -> ItemCatalog:
         return ItemCatalog.from_yaml(path)
     return ItemCatalog(
         {
-            "iron": Item(id="iron", name="Iron", category="raw"),
+            "iron_ore": Item(id="iron_ore", name="Iron Ore", category="raw"),
             "coal": Item(id="coal", name="Coal", category="raw"),
             "energy": Item(id="energy", name="Energy", category="utility"),
             "steel": Item(id="steel", name="Steel", category="processed"),
+            "construction_materials": Item(
+                id="construction_materials",
+                name="Construction Materials",
+                category="processed",
+            ),
         }
     )

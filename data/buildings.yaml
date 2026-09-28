@@ -1,14 +1,140 @@
 # Editable game content — Buildings
 # Add a building by appending under `buildings:`.
-# Production methods that set building_id to this id can run here.
-# `build_cost` is paid in cash when constructed on an owned plot.
+# Production methods reference buildings by `building_id`.
+#
+# Costs (placeholders):
+#   build_cost: cash paid on construct (default 100)
+#   build_cost_items: inventory goods consumed (default 10x construction_materials)
+#
+# Plot rules:
+#   Mine / Rig → specialized only
+#   All other factories → standard + specialized
 
 buildings:
+  - id: mine
+    name: Mine
+    description: Extracts ores and minerals (no recipe inputs)
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - specialized
+
+  - id: rig
+    name: Rig
+    description: Extracts oil, natural gas, and water (no recipe inputs)
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - specialized
+
   - id: foundry
     name: Foundry
-    description: Industrial building that smelts steel
-    build_cost: 200
-    # Optional: restrict which plot types may host this building
+    description: Smelts ores into metals
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: refinery
+    name: Refinery
+    description: Refines oil into fuel and propellant
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: chemical_plant
+    name: Chemical Plant
+    description: Produces industrial and advanced chemicals
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: manufacturing_facility
+    name: Manufacturing Facility
+    description: Makes construction goods, components, and materials
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: electronics_facility
+    name: Electronics Facility
+    description: Produces electronic components and semiconductors
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: assembly_facility
+    name: Assembly Facility
+    description: Assembles finished goods and devices
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: car_manufacturing_facility
+    name: Car Manufacturing Facility
+    description: Builds ICE and electric cars
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: plane_factory
+    name: Plane Factory
+    description: Builds aircraft
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: rocket_factory
+    name: Rocket Factory
+    description: Builds rockets
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: satellite_factory
+    name: Satellite Factory
+    description: Builds satellites
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized
+
+  - id: power_plant
+    name: Power Plant
+    description: Produces energy from coal, gas, or fuel
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
     allowed_plot_types:
       - standard
       - specialized

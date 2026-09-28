@@ -132,7 +132,7 @@ def test_land_build_produce_road_combine():
         for x, y in ((1, 1), (2, 1)):
             w.grid.get(x, y).plot.claim("company", "player")
         player.inventory.set("steel", 5)
-        player.inventory.set("iron", 5)
+        player.inventory.set("iron_ore", 5)
         player.inventory.set("coal", 5)
         player.inventory.set("energy", 5)
 
@@ -142,12 +142,19 @@ def test_land_build_produce_road_combine():
         r = w.set_production_method("company", "player", 1, 1, "make_steel")
         assert r.ok
         player.acted_this_day = False
-        steel_before = player.inventory.get("steel")
+        for item_id in ("iron_ore", "coal", "energy"):
+            w.deposit_to_building("company", "player", 1, 1, item_id, 1)
+            player.acted_this_day = False
+        steel_inv_before = player.inventory.get("steel")
         r = w.produce("company", "player", 1, 1)
         assert r.ok
-        assert player.inventory.get("steel") == steel_before + 1
-        # Building may be idle if day advanced (only one company → produce advances day)
-        assert w.grid.get(1, 1).plot.building is not None
+        bld = w.grid.get(1, 1).plot.building
+        assert bld is not None
+        assert bld.storage.get("steel") >= 1
+        assert player.inventory.get("steel") == steel_inv_before  # output stays in building
+        player.acted_this_day = False
+        w.withdraw_from_building("company", "player", 1, 1, "steel", 1)
+        assert player.inventory.get("steel") == steel_inv_before + 1
 
         player.acted_this_day = False
         steel_before = player.inventory.get("steel")
@@ -177,7 +184,7 @@ def test_market_full_cycle_companies_only():
         seller.inventory.set("steel", 10)
 
         with pytest.raises(ActionError):
-            w.post_sell("city", "city_a", "iron", 1, 5)
+            w.post_sell("city", "city_a", "iron_ore", 1, 5)
 
         w.post_sell("company", "ai_1", "steel", 3, price=40)
         w.post_sell("company", "ai_1", "steel", 2, price=25)
@@ -230,7 +237,7 @@ def test_direct_goods_and_plot_proposals_accept_reject():
 
         # goods buy → reject refunds
         cash = buyer.cash
-        r = w.propose_buy("company", "player", "ai_2", "iron", 2, 5)
+        r = w.propose_buy("company", "player", "ai_2", "iron_ore", 2, 5)
         pid = r.data["id"]
         w.reject_proposal("company", "ai_2", pid)
         assert buyer.cash == cash
@@ -268,10 +275,10 @@ def test_government_contracts_full_lifecycle():
         w = _world(Path(td), size=4, cities=1, ai=2)
         city = w.grid.cities["city_a"]
         c2 = w.companies["ai_2"]
-        c2.inventory.set("iron", 5)
+        c2.inventory.set("iron_ore", 5)
         c2.inventory.set("coal", 5)
 
-        r = w.post_government_contract("city", "city_a", {"iron": 2, "coal": 1})
+        r = w.post_government_contract("city", "city_a", {"iron_ore": 2, "coal": 1})
         cid = r.data["id"]
         w.bid_government_contract("company", "ai_1", cid, 90)
         w.bid_government_contract("company", "ai_2", cid, 50)
@@ -320,8 +327,12 @@ def test_all_llm_tools_are_registered_and_dispatch():
         "propose_plot_buy",
         "propose_plot_sell",
         "build_building",
+        "destroy_building",
+        "deposit_to_building",
+        "withdraw_from_building",
         "produce",
         "set_production_method",
+        "get_catalog",
         "post_sell",
         "post_buy",
         "buy_from_market",
@@ -355,13 +366,14 @@ def test_all_llm_tools_are_registered_and_dispatch():
         w.grid.get(0, 0).plot.claim("company", "ai_1")
         w.grid.get(1, 0).plot.claim("company", "ai_1")
         company.inventory.set("steel", 5)
-        company.inventory.set("iron", 5)
+        company.inventory.set("iron_ore", 5)
         company.inventory.set("coal", 5)
         company.inventory.set("energy", 5)
         ex = ToolExecutor(w, company)
 
         assert ex.execute("get_status", {})["ok"]
         assert ex.execute("get_market", {})["ok"]
+        assert ex.execute("get_catalog", {"section": "goods"})["ok"]
         assert ex.execute("list_plots_for_sale", {"limit": 3})["ok"]
         assert ex.execute("list_proposals", {})["ok"]
         assert ex.execute("list_government_contracts", {})["ok"]
@@ -371,7 +383,20 @@ def test_all_llm_tools_are_registered_and_dispatch():
         company.acted_this_day = False
         assert ex.execute("set_production_method", {"x": 0, "y": 0, "method_id": "make_steel"})["ok"]
         company.acted_this_day = False
+        for item_id in ("iron_ore", "coal", "energy"):
+            assert ex.execute(
+                "deposit_to_building",
+                {"x": 0, "y": 0, "item_id": item_id, "quantity": 1},
+            )["ok"]
+            company.acted_this_day = False
         assert ex.execute("produce", {"x": 0, "y": 0})["ok"]
+        company.acted_this_day = False
+        steel_qty = w.grid.get(0, 0).plot.building.storage.get("steel")
+        assert steel_qty >= 1
+        assert ex.execute(
+            "withdraw_from_building",
+            {"x": 0, "y": 0, "item_id": "steel", "quantity": steel_qty},
+        )["ok"]
         company.acted_this_day = False
         # Road on S so E edge stays free for combine with (1,0)
         assert ex.execute("build_road", {"x": 0, "y": 0, "side": "S"})["ok"]
@@ -381,7 +406,7 @@ def test_all_llm_tools_are_registered_and_dispatch():
         company.inventory.set("steel", 3)
         assert ex.execute("post_sell", {"item_id": "steel", "quantity": 1, "price": 40})["ok"]
         company.acted_this_day = False
-        assert ex.execute("buy_from_market", {"item_id": "iron", "quantity": 1})["ok"] or True
+        assert ex.execute("buy_from_market", {"item_id": "iron_ore", "quantity": 1})["ok"] or True
         company.acted_this_day = False
         assert ex.execute("post_buy", {"item_id": "coal", "quantity": 1, "price": 5})["ok"]
         # Retract the buy we just posted
@@ -415,7 +440,7 @@ def test_all_llm_tools_are_registered_and_dispatch():
         company.acted_this_day = False
         r = ex.execute(
             "propose_buy",
-            {"to": "player", "item_id": "iron", "quantity": 1, "price": 3},
+            {"to": "player", "item_id": "iron_ore", "quantity": 1, "price": 3},
         )
         assert r["ok"]
         pid = r["data"]["id"]
@@ -436,13 +461,13 @@ def test_all_llm_tools_are_registered_and_dispatch():
         # City gov contract path via tools
         city = w.grid.cities["city_a"]
         city_ex = ToolExecutor(w, city)
-        r = city_ex.execute("post_government_contract", {"requirements": {"iron": 1}})
+        r = city_ex.execute("post_government_contract", {"requirements": {"iron_ore": 1}})
         assert r["ok"]
         cid = r["data"]["id"]
         company.acted_this_day = False
         assert ex.execute("bid_government_contract", {"contract_id": cid, "price": 20})["ok"]
         assert city_ex.execute("award_government_contract", {"contract_id": cid})["ok"]
-        company.inventory.set("iron", 5)
+        company.inventory.set("iron_ore", 5)
         company.acted_this_day = False
         assert ex.execute("fulfill_government_contract", {"contract_id": cid})["ok"]
 
@@ -507,7 +532,7 @@ def test_player_http_api_setup_and_core_routes():
     world.grid.get(1, 1).plot.claim("company", "player")
     world.grid.get(2, 1).plot.claim("company", "player")
     world.companies["player"].inventory.set("steel", 5)
-    world.companies["player"].inventory.set("iron", 5)
+    world.companies["player"].inventory.set("iron_ore", 5)
     world.companies["player"].inventory.set("coal", 5)
     world.companies["player"].inventory.set("energy", 5)
 
@@ -515,7 +540,23 @@ def test_player_http_api_setup_and_core_routes():
         "/api/player/build", json={"x": 1, "y": 1, "building_id": "foundry"}
     ).json()["ok"]
     world.companies["player"].acted_this_day = False
+    assert client.post(
+        "/api/player/set_production_method",
+        json={"x": 1, "y": 1, "method_id": "make_steel"},
+    ).json()["ok"]
+    world.companies["player"].acted_this_day = False
+    for item_id in ("iron_ore", "coal", "energy"):
+        assert client.post(
+            "/api/player/deposit_to_building",
+            json={"x": 1, "y": 1, "item_id": item_id, "quantity": 1},
+        ).json()["ok"]
+        world.companies["player"].acted_this_day = False
     assert client.post("/api/player/produce", json={"x": 1, "y": 1}).json()["ok"]
+    world.companies["player"].acted_this_day = False
+    assert client.post(
+        "/api/player/withdraw_from_building",
+        json={"x": 1, "y": 1, "item_id": "steel", "quantity": 1},
+    ).json()["ok"]
     world.companies["player"].acted_this_day = False
     assert client.post(
         "/api/player/build_road", json={"x": 1, "y": 1, "side": "S"}
@@ -537,15 +578,15 @@ def test_player_http_api_setup_and_core_routes():
     world.companies["player"].acted_this_day = False
     assert client.post(
         "/api/player/market/buy_order",
-        json={"item_id": "iron", "quantity": 1, "price": 5},
+        json={"item_id": "iron_ore", "quantity": 1, "price": 5},
     ).json()["ok"]
 
     # Seed a sell so market buy works
-    world.companies["ai_1"].inventory.set("iron", 5)
-    world.post_sell("company", "ai_1", "iron", 2, 8)
+    world.companies["ai_1"].inventory.set("iron_ore", 5)
+    world.post_sell("company", "ai_1", "iron_ore", 2, 8)
     world.companies["player"].acted_this_day = False
     buy = client.post(
-        "/api/player/market/buy", json={"item_id": "iron", "quantity": 1}
+        "/api/player/market/buy", json={"item_id": "iron_ore", "quantity": 1}
     ).json()
     assert buy["ok"] is True
 
@@ -624,10 +665,10 @@ def test_player_http_api_setup_and_core_routes():
     assert client.get("/api/government_contracts").json()["ok"]
 
     # Bid/fulfill path via API after city posts
-    world.post_government_contract("city", "city_a", {"iron": 1})
+    world.post_government_contract("city", "city_a", {"iron_ore": 1})
     cid = world.gov_contracts._next_id_value - 1
     world.companies["player"].acted_this_day = False
-    world.companies["player"].inventory.set("iron", 5)
+    world.companies["player"].inventory.set("iron_ore", 5)
     assert client.post(
         "/api/player/bid_government_contract",
         json={"contract_id": cid, "price": 25},

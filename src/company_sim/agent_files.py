@@ -136,6 +136,18 @@ class AgentFileStore:
         add(gov, "shared", limit=2500 if compact else None)
         proposals = self.root / "proposals.txt"
         add(proposals, "shared", limit=2500 if compact else None)
+        # Economy catalogs — shared knowledge for every agent (goods / buildings / methods)
+        goods = self.root / "goods_index.txt"
+        buildings = self.root / "buildings_catalog.txt"
+        methods = self.root / "production_methods_catalog.txt"
+        if not goods.exists() or not buildings.exists() or not methods.exists():
+            world.persistence.save_goods_index(world)
+            world.persistence.save_buildings_catalog(world)
+            world.persistence.save_methods_catalog(world)
+        # Full catalogs (not truncated) so every agent can see all economy data
+        add(goods, "shared")
+        add(buildings, "shared")
+        add(methods, "shared")
 
         # 4) Pending proposals involving this actor (derived filter, not another file)
         mine = world.proposals.pending_for(actor.kind, actor.id)

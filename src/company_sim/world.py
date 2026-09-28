@@ -35,6 +35,9 @@ class WorldConfig:
     min_seconds_between_turns: float = 1.5
     save_dir: str | None = None
     llm_debug: bool = False  # write per-turn LLM traces under saves/llm_debug/
+    # If > 0, seed market with this many of EVERY catalog item at market_seed_price
+    market_seed_qty: int = 0
+    market_seed_price: int = 1
     # Deprecated aliases (tests / older callers); folded into map_size in __post_init__
     map_width: int | None = None
     map_height: int | None = None
@@ -56,7 +59,16 @@ class WorldConfig:
 
 
 def _starter_inventory() -> Inventory:
-    return Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0})
+    # Starter economy TBD later — temporary placeholder so buildings/recipes can run.
+    return Inventory(
+        {
+            "iron_ore": 20,
+            "coal": 20,
+            "energy": 20,
+            "steel": 0,
+            "construction_materials": 50,
+        }
+    )
 
 
 @dataclass
@@ -136,7 +148,15 @@ class World:
                 tile.plot.claim("city", tile.city_id)
 
         for city in grid.cities.values():
-            city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
+            city.inventory = Inventory(
+                {
+                    "iron_ore": 15,
+                    "coal": 15,
+                    "energy": 15,
+                    "steel": 0,
+                    "construction_materials": 40,
+                }
+            )
 
         # Player + AI companies start with NO plots
         player = Company(
@@ -156,7 +176,15 @@ class World:
                 name=f"Rival {i+1}",
                 is_player=False,
                 cash=1500,
-                inventory=Inventory({"iron": 10, "coal": 10, "energy": 10, "steel": 0}),
+                inventory=Inventory(
+                    {
+                        "iron_ore": 10,
+                        "coal": 10,
+                        "energy": 10,
+                        "steel": 0,
+                        "construction_materials": 30,
+                    }
+                ),
             )
 
         world._seed_market()
@@ -176,10 +204,30 @@ class World:
         return self.mailboxes
 
     def _seed_market(self) -> None:
+        # Optional: flood market with every catalog good (for loop tests / demos)
+        if self.config.market_seed_qty > 0:
+            price = max(0, int(self.config.market_seed_price))
+            qty = int(self.config.market_seed_qty)
+            for item in self.content.items.all():
+                self.market.inventory.add(item.id, qty)
+                lid = self.market.next_id()
+                self.market.add_listing(
+                    Listing(
+                        id=lid,
+                        side="sell",
+                        item_id=item.id,
+                        quantity=qty,
+                        price=price,
+                        owner_kind="company",
+                        owner_id="market_seed",
+                    )
+                )
+            return
+
         for company in self.companies.values():
             if company.is_player:
                 continue
-            for item_id, qty, price in (("iron", 2, 9), ("coal", 2, 7)):
+            for item_id, qty, price in (("iron_ore", 2, 9), ("coal", 2, 7)):
                 if company.inventory.get(item_id) < qty:
                     continue
                 company.inventory.add(item_id, -qty)
@@ -316,22 +364,36 @@ class World:
             raise ActionError(f"{bdef.name} cannot be built on {tile.plot.plot_type.value} plots")
         if actor.cash < bdef.build_cost:
             raise ActionError("Not enough cash")
+        if bdef.build_cost_items and not actor.inventory.has(bdef.build_cost_items):
+            raise ActionError(
+                f"Missing build materials: need {bdef.build_cost_items}, "
+                f"have {actor.inventory.as_dict()}"
+            )
 
         methods = self.content.methods_for_building(building_id)
         method_id = methods[0].id if methods else None
         actor.cash -= bdef.build_cost
+        if bdef.build_cost_items:
+            actor.inventory.consume(bdef.build_cost_items)
         tile.plot.building = Building(
             building_id=building_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
             production_method_id=method_id,
             status="idle",
+            storage=Inventory(),
         )
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
             f"Built {bdef.name} at ({x},{y})",
-            {"cost": bdef.build_cost, "building_id": building_id, "production_method_id": method_id},
+            {
+                "cost": bdef.build_cost,
+                "cost_items": dict(bdef.build_cost_items),
+                "building_id": building_id,
+                "production_method_id": method_id,
+                "storage_capacity": self.content.storage_capacity_for_building(building_id),
+            },
         )
 
     def set_production_method(
@@ -358,6 +420,111 @@ class World:
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(True, f"Set method {method_id}", {"method_id": method_id})
 
+    def deposit_to_building(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        x: int,
+        y: int,
+        item_id: str,
+        quantity: int,
+    ) -> ActionResult:
+        """Move goods from actor inventory into building storage (plot-owner owned)."""
+        actor = self.get_actor(owner_kind, owner_id)
+        tile = self.grid.get(x, y)
+        if not tile.plot or not tile.plot.building:
+            raise ActionError("No building there")
+        if not tile.plot.owned_by(owner_kind, owner_id):
+            raise ActionError("You do not own this plot")
+        if quantity <= 0:
+            raise ActionError("Invalid quantity")
+        if not self.items.has(item_id):
+            raise ActionError(f"Unknown item: {item_id}")
+        b = tile.plot.building
+        capacity = self.content.storage_capacity_for_building(b.building_id)
+        if item_id not in capacity:
+            raise ActionError(
+                f"{item_id} cannot be stored in {b.building_id} "
+                f"(allowed: {sorted(capacity.keys())})"
+            )
+        room = capacity[item_id] - b.storage.get(item_id)
+        if quantity > room:
+            raise ActionError(f"Not enough storage room for {item_id} (room={room}, cap={capacity[item_id]})")
+        if actor.inventory.get(item_id) < quantity:
+            raise ActionError("Not enough goods in inventory")
+        actor.inventory.add(item_id, -quantity)
+        b.storage.add(item_id, quantity)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Deposited {quantity}x {item_id} into building at ({x},{y})",
+            {"storage": b.storage.as_dict(), "capacity": capacity},
+        )
+
+    def withdraw_from_building(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        x: int,
+        y: int,
+        item_id: str,
+        quantity: int,
+    ) -> ActionResult:
+        """Move goods from building storage into actor inventory."""
+        actor = self.get_actor(owner_kind, owner_id)
+        tile = self.grid.get(x, y)
+        if not tile.plot or not tile.plot.building:
+            raise ActionError("No building there")
+        if not tile.plot.owned_by(owner_kind, owner_id):
+            raise ActionError("You do not own this plot")
+        if quantity <= 0:
+            raise ActionError("Invalid quantity")
+        b = tile.plot.building
+        if b.storage.get(item_id) < quantity:
+            raise ActionError("Not enough goods in building storage")
+        b.storage.add(item_id, -quantity)
+        actor.inventory.add(item_id, quantity)
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Withdrew {quantity}x {item_id} from building at ({x},{y})",
+            {"storage": b.storage.as_dict()},
+        )
+
+    def destroy_building(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        x: int,
+        y: int,
+    ) -> ActionResult:
+        """Remove building; return storage + 10% of build materials (floored) to owner."""
+        actor = self.get_actor(owner_kind, owner_id)
+        tile = self.grid.get(x, y)
+        if not tile.plot or not tile.plot.building:
+            raise ActionError("No building there")
+        if not tile.plot.owned_by(owner_kind, owner_id):
+            raise ActionError("You do not own this plot")
+        b = tile.plot.building
+        bdef = self.buildings.get(b.building_id)
+        refund_items = {k: int(v) // 10 for k, v in bdef.build_cost_items.items() if int(v) // 10 > 0}
+        returned_storage = dict(b.storage.as_dict())
+        for item_id, qty in returned_storage.items():
+            actor.inventory.add(item_id, qty)
+        for item_id, qty in refund_items.items():
+            actor.inventory.add(item_id, qty)
+        tile.plot.building = None
+        self.note_actor_action(owner_kind, owner_id)
+        return ActionResult(
+            True,
+            f"Destroyed {bdef.name} at ({x},{y})",
+            {
+                "refund_items": refund_items,
+                "returned_storage": returned_storage,
+                "building_id": b.building_id,
+            },
+        )
+
     def produce(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
@@ -374,21 +541,43 @@ class World:
             raise ActionError(f"Unknown method: {b.production_method_id}") from exc
         if method.building_id != b.building_id:
             raise ActionError("Method does not match building")
-        if not actor.inventory.has(method.inputs):
-            raise ActionError(f"Missing inputs: need {method.inputs}, have {actor.inventory.as_dict()}")
+        # Production runs through building storage (owned by plot owner)
+        if not b.storage.has(method.inputs):
+            raise ActionError(
+                f"Missing inputs in building storage: need {method.inputs}, "
+                f"have {b.storage.as_dict()}"
+            )
+        capacity = self.content.storage_capacity_for_building(b.building_id)
+        bonus = self.grid.production_bonus_at(x, y)
+        batches = max(1, int(bonus))
+        # Check output room for all batches before consuming
+        for item_id, out_qty in method.outputs.items():
+            need = out_qty * batches
+            room = capacity.get(item_id, 0) - b.storage.get(item_id)
+            # After consuming inputs, room increases for input items that are also outputs
+            if item_id in method.inputs:
+                room += method.inputs[item_id]
+            if need > room:
+                raise ActionError(
+                    f"Not enough storage room for output {item_id} "
+                    f"(need {need}, room {room}, cap {capacity.get(item_id, 0)})"
+                )
 
         b.status = "working"
-        actor.inventory.consume(method.inputs)
-        bonus = self.grid.production_bonus_at(x, y)
-        actor.inventory.produce(method.outputs)
-        if bonus > 1.0 and int(bonus) > 1:
-            for _ in range(int(bonus) - 1):
-                actor.inventory.produce(method.outputs)
+        b.storage.consume(method.inputs)
+        for _ in range(batches):
+            b.storage.produce(method.outputs)
         self.note_actor_action(owner_kind, owner_id)
         return ActionResult(
             True,
-            f"Produced via {method.id} at ({x},{y})",
-            {"inputs": method.inputs, "outputs": method.outputs, "bonus": bonus},
+            f"Produced via {method.id} at ({x},{y}) into building storage",
+            {
+                "inputs": method.inputs,
+                "outputs": method.outputs,
+                "bonus": bonus,
+                "batches": batches,
+                "storage": b.storage.as_dict(),
+            },
         )
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int, side: str) -> ActionResult:
@@ -639,8 +828,9 @@ class World:
         buyer.cash -= cost
         self.market.inventory.add(listing.item_id, -qty)
         buyer.inventory.add(listing.item_id, qty)
-        seller = self.get_actor(listing.owner_kind, listing.owner_id)
-        seller.cash += cost
+        if not (listing.owner_kind == "company" and listing.owner_id == "market_seed"):
+            seller = self.get_actor(listing.owner_kind, listing.owner_id)
+            seller.cash += cost
         listing.quantity -= qty
         if listing.quantity <= 0:
             self.market.remove_listing(listing.id)
@@ -669,8 +859,9 @@ class World:
                 break
             self.market.inventory.add(sell.item_id, -take)
             buyer.inventory.add(buy.item_id, take)
-            seller = self.get_actor(sell.owner_kind, sell.owner_id)
-            seller.cash += cost
+            if not (sell.owner_kind == "company" and sell.owner_id == "market_seed"):
+                seller = self.get_actor(sell.owner_kind, sell.owner_id)
+                seller.cash += cost
             refund = reserved - cost
             if refund:
                 buyer.cash += refund

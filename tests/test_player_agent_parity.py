@@ -68,14 +68,14 @@ def test_player_action_api_runs_same_tools(monkeypatch, tmp_path):
     # Market buy via unified action path
     buy = client.post(
         "/api/player/action",
-        json={"name": "buy_from_market", "arguments": {"item_id": "iron", "quantity": 1}},
+        json={"name": "buy_from_market", "arguments": {"item_id": "iron_ore", "quantity": 1}},
     ).json()
     assert buy["ok"] is True
 
     # Reject city-only tool
     blocked = client.post(
         "/api/player/action",
-        json={"name": "post_government_contract", "arguments": {"requirements": {"iron": 1}}},
+        json={"name": "post_government_contract", "arguments": {"requirements": {"iron_ore": 1}}},
     ).json()
     assert blocked["ok"] is False
 

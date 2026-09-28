@@ -272,7 +272,7 @@ class AIScheduler:
         if not mine_open and not mine_awarded and city.cash >= 80:
             try:
                 world.post_government_contract(
-                    "city", city.id, {"iron": 2, "coal": 2, "energy": 1}
+                    "city", city.id, {"iron_ore": 2, "coal": 2, "energy": 1}
                 )
                 self.last_thought = f"{city.name}: posted government contract"
                 return
@@ -375,7 +375,7 @@ class AIScheduler:
             except Exception:
                 pass
 
-        # Produce if we have a foundry + inputs
+        # Produce if we have a foundry + inputs (via building storage)
         for t in owned:
             b = t.plot.building if t.plot else None
             if not b or not b.production_method_id:
@@ -384,7 +384,24 @@ class AIScheduler:
                 method = world.production.get(b.production_method_id)
             except KeyError:
                 continue
-            if company.inventory.has(method.inputs):
+            # Deposit missing inputs from company inventory into building storage
+            for item_id, need in method.inputs.items():
+                in_storage = b.storage.get(item_id)
+                short = need - in_storage
+                if short <= 0:
+                    continue
+                have = company.inventory.get(item_id)
+                if have <= 0:
+                    break
+                try:
+                    world.deposit_to_building(
+                        "company", company.id, t.x, t.y, item_id, min(short, have)
+                    )
+                    self.last_thought = f"{company.name}: deposited {item_id} for {method.id}"
+                    return
+                except Exception:
+                    break
+            if b.storage.has(method.inputs):
                 try:
                     world.produce("company", company.id, t.x, t.y)
                     self.last_thought = f"{company.name}: produced {method.id}"
@@ -392,6 +409,34 @@ class AIScheduler:
                 except Exception as exc:  # noqa: BLE001
                     self.last_thought = f"{company.name}: produce failed ({exc})"
                     break
+
+        # Withdraw finished goods from building storage into inventory
+        for t in owned:
+            b = t.plot.building if t.plot else None
+            if not b:
+                continue
+            for item_id, qty in list(b.storage.as_dict().items()):
+                if qty <= 0:
+                    continue
+                # Prefer withdrawing outputs (not leftover inputs)
+                try:
+                    method = (
+                        world.production.get(b.production_method_id)
+                        if b.production_method_id
+                        else None
+                    )
+                except KeyError:
+                    method = None
+                if method and item_id in method.inputs and item_id not in method.outputs:
+                    continue
+                try:
+                    world.withdraw_from_building(
+                        "company", company.id, t.x, t.y, item_id, qty
+                    )
+                    self.last_thought = f"{company.name}: withdrew {qty}x {item_id}"
+                    return
+                except Exception:
+                    continue
 
         # Sell steel if any
         steel = company.inventory.get("steel")
@@ -404,7 +449,7 @@ class AIScheduler:
                 self.last_thought = f"{company.name}: sell failed ({exc})"
 
         # Buy cheapest missing input from market
-        for item_id in ("iron", "coal", "energy"):
+        for item_id in ("iron_ore", "coal", "energy"):
             if company.inventory.get(item_id) < 3:
                 try:
                     world.buy_from_market("company", company.id, item_id, 2)

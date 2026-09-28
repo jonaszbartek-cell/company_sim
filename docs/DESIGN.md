@@ -44,7 +44,7 @@ A **city is not a special tile**. It is an LLM agent administering territory of 
 | Roads | Built on a **side** (N/E/S/W) of an owned plot only — neighbor unchanged; costs **1 steel** (placeholder, goods consumed) |
 | Plot combine | Flag only — plots stay; adjacent + no road between; no road on combined side |
 | Plot types | `standard`, `specialized` |
-| Goods | iron, coal, energy, steel + Foundry / make_steel |
+| Goods | iron_ore, coal, energy, steel + Foundry / make_steel |
 | Plot trade | Direct `plot_buy` / `plot_sell` proposals (accept/reject) |
 
 ---

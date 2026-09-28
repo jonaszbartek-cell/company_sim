@@ -45,6 +45,6 @@ PYTHONPATH=src python -m company_sim
 
 - Propose buy/sell plot → Accept / Reject proposals
 - Build / Produce / Road (pick side) / Combine
-- Market: Buy 1 iron / Sell 1 steel
+- Market: Buy 1 iron_ore / Sell 1 steel
 - Mail: pick contact → send message
 - Pass day / Pause

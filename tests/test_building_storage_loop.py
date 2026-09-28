@@ -1,0 +1,263 @@
+"""Full production loop tests (player + agent) and building storage."""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from company_sim.actions import ActionError
+from company_sim.ai.tools import ToolExecutor
+from company_sim.content import GameContent
+from company_sim.world import World, WorldConfig
+
+
+def _loop_world(tmp: Path, *, actor: str = "player") -> World:
+    """Rich market + cash for end-to-end produce loops on standard plots."""
+    return World.new_game(
+        WorldConfig(
+            map_size=6,
+            starting_cities=1,
+            ai_company_count=1 if actor != "player" else 0,
+            save_dir=str(tmp),
+            min_seconds_between_turns=0.0,
+            player_starting_cash=50_000,
+            market_seed_qty=100,
+            market_seed_price=1,
+        )
+    )
+
+
+def _standard_city_plot(w: World):
+    city = next(iter(w.grid.cities.values()))
+    return next(
+        t
+        for t in w.grid.tiles
+        if t.plot
+        and t.plot.owned_by("city", city.id)
+        and t.plot.plot_type.value == "standard"
+        and t.plot.building is None
+    )
+
+
+def _buy_plot(w: World, company_id: str, tile) -> None:
+    city_id = tile.plot.owner_id
+    price = 50
+    company = w.companies[company_id]
+    company.cash = max(company.cash, price + 10_000)
+    company.inventory.set("construction_materials", max(company.inventory.get("construction_materials"), 20))
+    prop = w.propose_plot_buy("company", company_id, f"city:{city_id}", tile.x, tile.y, price)
+    w.accept_proposal("city", city_id, prop.data["id"])
+    assert tile.plot.owned_by("company", company_id)
+
+
+def _foundry_loop(w: World, company_id: str) -> dict:
+    """buy plot → build foundry → set method → buy inputs → deposit → produce → withdraw → sell."""
+    tile = _standard_city_plot(w)
+    _buy_plot(w, company_id, tile)
+    x, y = tile.x, tile.y
+    company = w.companies[company_id]
+
+    # Ensure build materials
+    company.inventory.set("construction_materials", max(20, company.inventory.get("construction_materials")))
+    r = w.build_building("company", company_id, x, y, "foundry")
+    assert r.ok, r.message
+    assert tile.plot.building is not None
+    cap = w.content.storage_capacity_for_building("foundry")
+    assert cap["iron_ore"] == 10 and cap["steel"] == 10
+
+    r = w.set_production_method("company", company_id, x, y, "make_steel")
+    assert r.ok, r.message
+
+    # Buy inputs from seeded market @1
+    for item_id in ("iron_ore", "coal", "energy"):
+        before = company.inventory.get(item_id)
+        buy = w.buy_from_market("company", company_id, item_id, 1)
+        assert buy.ok, buy.message
+        assert company.inventory.get(item_id) == before + 1
+
+    for item_id in ("iron_ore", "coal", "energy"):
+        dep = w.deposit_to_building("company", company_id, x, y, item_id, 1)
+        assert dep.ok, dep.message
+
+    steel_before_inv = company.inventory.get("steel")
+    prod = w.produce("company", company_id, x, y)
+    assert prod.ok, prod.message
+    assert tile.plot.building.storage.get("steel") >= 1
+    assert company.inventory.get("steel") == steel_before_inv  # still in building
+
+    out_qty = tile.plot.building.storage.get("steel")
+    wd = w.withdraw_from_building("company", company_id, x, y, "steel", out_qty)
+    assert wd.ok, wd.message
+    assert company.inventory.get("steel") == steel_before_inv + out_qty
+
+    sell = w.post_sell("company", company_id, "steel", out_qty, 5)
+    assert sell.ok, sell.message
+    assert company.inventory.get("steel") == steel_before_inv
+    return {"x": x, "y": y, "sold": out_qty, "listing_id": sell.data["listing_id"]}
+
+
+def test_storage_slots_follow_methods():
+    c = GameContent.load()
+    foundry_slots = set(c.storage_items_for_building("foundry"))
+    assert {"iron_ore", "coal", "energy", "steel", "copper_ore", "copper", "bauxite", "aluminum"} <= foundry_slots
+    mine_slots = set(c.storage_items_for_building("mine"))
+    assert "iron_ore" in mine_slots and "steel" not in mine_slots
+    for item_id, cap in c.storage_capacity_for_building("foundry").items():
+        assert cap == 10
+
+
+def test_agents_can_read_full_catalogs():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        for path_name in (
+            "goods_index.txt",
+            "buildings_catalog.txt",
+            "production_methods_catalog.txt",
+        ):
+            assert (Path(td) / path_name).is_file()
+        bundle = w.file_store.pack_for_agent(w, w.companies["player"], compact=True)
+        text = bundle.prompt_text
+        assert "GOODS INDEX" in text
+        assert "BUILDINGS CATALOG" in text
+        assert "PRODUCTION METHODS CATALOG" in text
+        assert "make_steel" in text
+        assert "foundry" in text
+        # Tool path
+        ex = ToolExecutor(w, w.companies["player"])
+        g = ex.execute("get_catalog", {"section": "good", "id": "steel"})
+        assert g["ok"] and g["data"]["made_in_buildings"] == ["foundry"]
+        b = ex.execute("get_catalog", {"section": "buildings"})
+        assert b["ok"] and len(b["data"]["buildings"]) >= 13
+        m = ex.execute("get_catalog", {"section": "methods", "id": "make_steel"})
+        assert m["ok"] and m["data"]["inputs"]["iron_ore"] == 1
+
+
+def test_destroy_building_refunds_ten_percent_floored():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        tile = _standard_city_plot(w)
+        _buy_plot(w, "player", tile)
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 20)
+        w.build_building("company", "player", tile.x, tile.y, "foundry")
+        # Put something in storage
+        player.inventory.set("coal", 2)
+        w.deposit_to_building("company", "player", tile.x, tile.y, "coal", 2)
+        cm_before = player.inventory.get("construction_materials")
+        coal_before = player.inventory.get("coal")
+        r = w.destroy_building("company", "player", tile.x, tile.y)
+        assert r.ok
+        assert tile.plot.building is None
+        # 10 of construction_materials → 10% floored = 1
+        assert r.data["refund_items"] == {"construction_materials": 1}
+        assert player.inventory.get("construction_materials") == cm_before + 1
+        assert player.inventory.get("coal") == coal_before + 2
+
+
+def test_deposit_rejects_non_slot_and_over_capacity():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        tile = _standard_city_plot(w)
+        _buy_plot(w, "player", tile)
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 20)
+        w.build_building("company", "player", tile.x, tile.y, "foundry")
+        player.inventory.set("smartphone", 1)
+        with pytest.raises(ActionError, match="cannot be stored"):
+            w.deposit_to_building("company", "player", tile.x, tile.y, "smartphone", 1)
+        player.inventory.set("iron_ore", 20)
+        w.deposit_to_building("company", "player", tile.x, tile.y, "iron_ore", 10)
+        with pytest.raises(ActionError, match="storage room"):
+            w.deposit_to_building("company", "player", tile.x, tile.y, "iron_ore", 1)
+
+
+def test_full_loop_player():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        # Market has 100 of each @1
+        assert w.market.inventory.get("iron_ore") == 100
+        result = _foundry_loop(w, "player")
+        assert result["sold"] >= 1
+
+
+def test_full_loop_agent_via_tools():
+    with tempfile.TemporaryDirectory() as td:
+        w = World.new_game(
+            WorldConfig(
+                map_size=6,
+                starting_cities=1,
+                ai_company_count=1,
+                save_dir=str(td),
+                min_seconds_between_turns=0.0,
+                player_starting_cash=50_000,
+                market_seed_qty=100,
+                market_seed_price=1,
+            )
+        )
+        agent = w.companies["ai_1"]
+        agent.cash = 50_000
+        agent.inventory.set("construction_materials", 30)
+        ex = ToolExecutor(w, agent)
+
+        tile = _standard_city_plot(w)
+        city_id = tile.plot.owner_id
+        prop = ex.execute(
+            "propose_plot_buy",
+            {"to": f"city:{city_id}", "x": tile.x, "y": tile.y, "price": 50},
+        )
+        assert prop["ok"], prop
+        w.accept_proposal("city", city_id, prop["data"]["id"])
+
+        assert ex.execute("build_building", {"x": tile.x, "y": tile.y, "building_id": "foundry"})["ok"]
+        assert ex.execute(
+            "set_production_method",
+            {"x": tile.x, "y": tile.y, "method_id": "make_steel"},
+        )["ok"]
+
+        for item_id in ("iron_ore", "coal", "energy"):
+            assert ex.execute("buy_from_market", {"item_id": item_id, "quantity": 1})["ok"]
+            assert ex.execute(
+                "deposit_to_building",
+                {"x": tile.x, "y": tile.y, "item_id": item_id, "quantity": 1},
+            )["ok"]
+
+        prod = ex.execute("produce", {"x": tile.x, "y": tile.y})
+        assert prod["ok"], prod
+        steel_qty = tile.plot.building.storage.get("steel")
+        assert steel_qty >= 1
+        assert ex.execute(
+            "withdraw_from_building",
+            {"x": tile.x, "y": tile.y, "item_id": "steel", "quantity": steel_qty},
+        )["ok"]
+        sell = ex.execute("post_sell", {"item_id": "steel", "quantity": steel_qty, "price": 5})
+        assert sell["ok"], sell
+
+
+def test_produce_without_building_storage_fails():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        tile = _standard_city_plot(w)
+        _buy_plot(w, "player", tile)
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 20)
+        player.inventory.set("iron_ore", 5)
+        player.inventory.set("coal", 5)
+        player.inventory.set("energy", 5)
+        w.build_building("company", "player", tile.x, tile.y, "foundry")
+        w.set_production_method("company", "player", tile.x, tile.y, "make_steel")
+        with pytest.raises(ActionError, match="building storage"):
+            w.produce("company", "player", tile.x, tile.y)
+
+
+def test_market_seed_lists_every_item():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        items = {i.id for i in w.content.items.all()}
+        for item_id in items:
+            assert w.market.inventory.get(item_id) == 100
+        # Buy one random finished good cheaply
+        r = w.buy_from_market("company", "player", "steel", 3)
+        assert r.ok
+        assert r.data["spent"] == 3

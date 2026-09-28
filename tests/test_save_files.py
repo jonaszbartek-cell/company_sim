@@ -111,7 +111,8 @@ def test_action_updates_correct_files():
 
         agent_txt = (root / "agents" / "player.txt").read_text(encoding="utf-8")
         assert f"cash: {player.cash}" in agent_txt
-        assert player.cash == cash_before - 200
+        assert player.cash == cash_before - 100
+        assert player.inventory.get("construction_materials") == 40  # starter 50 - 10
         assert "type=foundry" in agent_txt or "foundry" in agent_txt
         assert "status=idle" in agent_txt
 

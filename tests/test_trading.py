@@ -123,7 +123,7 @@ def test_direct_buy_proposal_reject_refunds_cash():
         w = _world(Path(td))
         buyer = w.companies["player"]
         cash = buyer.cash
-        r = w.propose_buy("company", "player", "ai_1", "iron", 3, 9)
+        r = w.propose_buy("company", "player", "ai_1", "iron_ore", 3, 9)
         assert r.ok
         assert buyer.cash == cash - 27
         pid = r.data["id"]
@@ -137,14 +137,14 @@ def test_direct_buy_proposal_accept_moves_goods_and_cash():
         w = _world(Path(td))
         buyer = w.companies["player"]
         seller = w.companies["ai_2"]
-        seller.inventory.set("iron", 10)
+        seller.inventory.set("iron_ore", 10)
         cash_b, cash_s = buyer.cash, seller.cash
-        iron_b, iron_s = buyer.inventory.get("iron"), seller.inventory.get("iron")
-        r = w.propose_buy("company", "player", "ai_2", "iron", 4, 5)
+        iron_b, iron_s = buyer.inventory.get("iron_ore"), seller.inventory.get("iron_ore")
+        r = w.propose_buy("company", "player", "ai_2", "iron_ore", 4, 5)
         pid = r.data["id"]
         w.accept_proposal("company", "ai_2", pid)
-        assert buyer.inventory.get("iron") == iron_b + 4
-        assert seller.inventory.get("iron") == iron_s - 4
+        assert buyer.inventory.get("iron_ore") == iron_b + 4
+        assert seller.inventory.get("iron_ore") == iron_s - 4
         assert buyer.cash == cash_b - 20
         assert seller.cash == cash_s + 20
 

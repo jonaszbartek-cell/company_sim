@@ -110,7 +110,7 @@ def test_produce_without_inputs_fails_and_does_not_consume():
         _claim_plot(w, "player", 1, 1)
         player = w.companies["player"]
         player.cash = 5000
-        player.inventory.set("iron", 0)
+        player.inventory.set("iron_ore", 0)
         player.inventory.set("coal", 0)
         player.inventory.set("energy", 0)
         w.build_building("company", "player", 1, 1, "foundry")
@@ -191,13 +191,13 @@ def test_post_sell_zero_or_negative_rejected():
     with tempfile.TemporaryDirectory() as td:
         w = _w(Path(td), ai=0)
         player = w.companies["player"]
-        player.inventory.set("iron", 10)
+        player.inventory.set("iron_ore", 10)
         with pytest.raises(ActionError):
-            w.post_sell("company", "player", "iron", 0, 5)
+            w.post_sell("company", "player", "iron_ore", 0, 5)
         with pytest.raises(ActionError):
-            w.post_sell("company", "player", "iron", -1, 5)
+            w.post_sell("company", "player", "iron_ore", -1, 5)
         with pytest.raises(ActionError):
-            w.post_sell("company", "player", "iron", 1, -5)
+            w.post_sell("company", "player", "iron_ore", 1, -5)
 
 
 def test_post_sell_unknown_item():
@@ -212,14 +212,14 @@ def test_cannot_buy_own_sell_listing():
         w = _w(Path(td), ai=0)
         player = w.companies["player"]
         # Clear seeded market sells from other companies (none) and post own
-        player.inventory.set("iron", 5)
+        player.inventory.set("iron_ore", 5)
         player.cash = 1000
-        w.post_sell("company", "player", "iron", 5, 1)
-        # Only own listing remains for iron at price 1 — buy should fail or skip own
-        before = player.inventory.get("iron")
+        w.post_sell("company", "player", "iron_ore", 5, 1)
+        # Only own listing remains for iron_ore at price 1 — buy should fail or skip own
+        before = player.inventory.get("iron_ore")
         with pytest.raises(ActionError):
-            w.buy_from_market("company", "player", "iron", 1)
-        assert player.inventory.get("iron") == before
+            w.buy_from_market("company", "player", "iron_ore", 1)
+        assert player.inventory.get("iron_ore") == before
 
 
 def test_buy_partial_when_cash_short():
@@ -250,8 +250,8 @@ def test_retract_sell_twice_fails():
     with tempfile.TemporaryDirectory() as td:
         w = _w(Path(td), ai=0)
         player = w.companies["player"]
-        player.inventory.set("iron", 3)
-        r = w.post_sell("company", "player", "iron", 3, 9)
+        player.inventory.set("iron_ore", 3)
+        r = w.post_sell("company", "player", "iron_ore", 3, 9)
         lid = r.data["listing_id"]
         w.retract_sell("company", "player", lid)
         with pytest.raises(ActionError):
@@ -262,11 +262,11 @@ def test_city_banned_from_market_and_goods_proposals():
     with tempfile.TemporaryDirectory() as td:
         w = _w(Path(td), ai=0)
         city = next(iter(w.grid.cities.values()))
-        city.inventory.set("iron", 5)
+        city.inventory.set("iron_ore", 5)
         with pytest.raises(ActionError, match="companies"):
-            w.post_sell("city", city.id, "iron", 1, 5)
+            w.post_sell("city", city.id, "iron_ore", 1, 5)
         with pytest.raises(ActionError):
-            w.propose_sell("city", city.id, "company:player", "iron", 1, 5)
+            w.propose_sell("city", city.id, "company:player", "iron_ore", 1, 5)
 
 
 # ---------- proposals ----------
@@ -314,9 +314,9 @@ def test_propose_sell_to_self_rejected_or_fails():
     with tempfile.TemporaryDirectory() as td:
         w = _w(Path(td), ai=0)
         player = w.companies["player"]
-        player.inventory.set("iron", 2)
+        player.inventory.set("iron_ore", 2)
         with pytest.raises(ActionError):
-            w.propose_sell("company", "player", "company:player", "iron", 1, 5)
+            w.propose_sell("company", "player", "company:player", "iron_ore", 1, 5)
 
 
 # ---------- day / turns ----------
@@ -445,9 +445,9 @@ def test_company_cannot_post_or_award_gov_contract():
     with tempfile.TemporaryDirectory() as td:
         w = _w(Path(td), ai=0)
         with pytest.raises(ActionError):
-            w.post_government_contract("company", "player", {"iron": 1})
+            w.post_government_contract("company", "player", {"iron_ore": 1})
         city = next(iter(w.grid.cities.values()))
-        posted = w.post_government_contract("city", city.id, {"iron": 1})
+        posted = w.post_government_contract("city", city.id, {"iron_ore": 1})
         cid = posted.data["id"]
         w.bid_government_contract("company", "player", cid, 50)
         with pytest.raises(ActionError):
@@ -531,9 +531,9 @@ def test_city_tool_executor_can_post_gov_but_not_market():
         w = _w(Path(td), ai=0)
         city = next(iter(w.grid.cities.values()))
         ex = ToolExecutor(w, city)
-        bad = ex.execute("post_sell", {"item_id": "iron", "quantity": 1, "price": 5})
+        bad = ex.execute("post_sell", {"item_id": "iron_ore", "quantity": 1, "price": 5})
         assert bad["ok"] is False
-        good = ex.execute("post_government_contract", {"requirements": {"iron": 1}})
+        good = ex.execute("post_government_contract", {"requirements": {"iron_ore": 1}})
         assert good["ok"] is True
 
 
@@ -548,16 +548,16 @@ def test_save_reload_surfaces_after_mixed_actions():
         _claim_plot(w, "player", 1, 1)
         player.cash = 5000
         player.inventory.set("steel", 3)
-        player.inventory.set("iron", 5)
+        player.inventory.set("iron_ore", 5)
         w.build_building("company", "player", 1, 1, "foundry")
         w.build_road("company", "player", 1, 1, "S")
-        w.post_sell("company", "player", "iron", 2, 11)
+        w.post_sell("company", "player", "iron_ore", 2, 11)
         w.send_message("company", "player", "company:ai_1", "yo")
         w.persistence.save_all(w)
 
         assert (root / "agents" / "player.txt").read_text(encoding="utf-8").count("foundry") >= 1
         market = (root / "market.txt").read_text(encoding="utf-8")
-        assert "iron" in market
+        assert "iron_ore" in market
         assert (root / "instructions" / "COMPANY_INSTRUCTIONS_player.txt").is_file()
         pub = w.to_public_dict()
         assert pub["llm_debug"]["enabled"] is True
