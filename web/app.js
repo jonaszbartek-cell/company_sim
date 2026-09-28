@@ -572,6 +572,7 @@ setupForm.addEventListener("submit", async (ev) => {
   setupError.hidden = true;
   const body = {
     ai_companies: Number(document.getElementById("setup-companies").value),
+    small_companies_per_city: Number(document.getElementById("setup-small-per-city").value),
     cities: Number(document.getElementById("setup-cities").value),
     map_size: Number(document.getElementById("setup-map").value),
     specialized_plot_percent: Number(document.getElementById("setup-specialized-pct").value),

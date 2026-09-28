@@ -22,6 +22,8 @@ WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 
 class SetupBody(BaseModel):
     ai_companies: int = Field(default=2, ge=0, le=12)
+    # Engine-scripted small firms per city (plots around City Hall)
+    small_companies_per_city: int = Field(default=0, ge=0, le=20)
     cities: int = Field(default=1, ge=1, le=8)
     map_size: int = Field(default=12, ge=2, le=128)
     # Percent of all plots that become specialized mine/well resource clusters
@@ -167,6 +169,7 @@ def create_app() -> FastAPI:
                         "started": False,
                         "defaults": {
                             "ai_companies": 2,
+                            "small_companies_per_city": 0,
                             "cities": 1,
                             "map_size": 12,
                             "specialized_plot_percent": 15,
@@ -204,6 +207,7 @@ def create_app() -> FastAPI:
             "started": world is not None and world.started,
             "defaults": {
                 "ai_companies": 2,
+                "small_companies_per_city": 0,
                 "cities": 1,
                 "map_size": 12,
                 "specialized_plot_percent": 15,
@@ -213,6 +217,7 @@ def create_app() -> FastAPI:
             if world is None
             else {
                 "ai_companies": world.config.ai_company_count,
+                "small_companies_per_city": world.config.small_companies_per_city,
                 "cities": world.config.starting_cities,
                 "map_size": world.config.map_size,
                 "specialized_plot_percent": world.config.specialized_plot_percent,
@@ -231,6 +236,7 @@ def create_app() -> FastAPI:
                     map_size=body.map_size,
                     starting_cities=body.cities,
                     ai_company_count=body.ai_companies,
+                    small_companies_per_city=body.small_companies_per_city,
                     specialized_plot_percent=body.specialized_plot_percent,
                     llm_debug=bool(body.llm_debug),
                 )
@@ -240,7 +246,8 @@ def create_app() -> FastAPI:
                 "ok": True,
                 "message": (
                     f"Started {body.map_size}x{body.map_size} map with "
-                    f"{body.cities} cities and {body.ai_companies} AI companies"
+                    f"{body.cities} cities, {body.ai_companies} AI companies, "
+                    f"{body.small_companies_per_city} small companies/city"
                     + (" (LLM debug on)" if body.llm_debug else "")
                 ),
                 "state": world.to_public_dict(),
@@ -260,6 +267,7 @@ def create_app() -> FastAPI:
                 "ai_mode": None,
                 "defaults": {
                     "ai_companies": 2,
+                    "small_companies_per_city": 0,
                     "cities": 1,
                     "map_size": 12,
                     "specialized_plot_percent": 15,
@@ -657,6 +665,7 @@ def create_app() -> FastAPI:
                         "started": False,
                         "defaults": {
                             "ai_companies": 2,
+                            "small_companies_per_city": 0,
                             "cities": 1,
                             "map_size": 12,
                             "specialized_plot_percent": 15,

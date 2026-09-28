@@ -72,6 +72,13 @@ class AIScheduler:
 
         self._last_turn_wall = world.time_sec
 
+        # Small companies: deterministic engine script only (never LLM)
+        from company_sim.actors import Company as CompanyCls
+
+        if isinstance(actor, CompanyCls) and actor.is_small:
+            self._run_small_company_turn(world, actor)
+            return
+
         if self.llm_mode == "online" or (
             self.llm.config.enabled and self.llm_mode != "off" and self.llm.available()
         ):
@@ -86,6 +93,19 @@ class AIScheduler:
             return
 
         self._run_heuristic_turn(world, actor)
+
+    def _run_small_company_turn(self, world: World, actor: Actor) -> None:
+        from company_sim.actors import Company as CompanyCls
+        from company_sim.small_companies import run_small_company_turn
+
+        try:
+            assert isinstance(actor, CompanyCls)
+            self.last_thought = run_small_company_turn(world, actor)
+        finally:
+            if not actor.acted_this_day:
+                world.pass_turn(actor.kind, actor.id)
+            world.persistence.save_all(world)
+            world.advance_ai_turn()
 
     def _run_heuristic_turn(self, world: World, actor: Actor) -> None:
         try:

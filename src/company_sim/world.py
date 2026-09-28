@@ -29,6 +29,8 @@ class WorldConfig:
     tick_hz: float = 4.0
     starting_cities: int = 1
     ai_company_count: int = 2
+    # Engine-scripted small firms per city (spawn around City Hall at start)
+    small_companies_per_city: int = 0
     player_starting_cash: int = 2500
     road_build_cost: int = 50  # legacy cash cost (unused; roads cost steel)
     road_build_steel: int = 1  # placeholder: steel consumed per edge road
@@ -98,6 +100,9 @@ class World:
     file_store: AgentFileStore | None = None
     llm_debug_log: LLMDebugLog | None = None
     started: bool = True
+    # When True, note_actor_action still marks acted but does not roll the day
+    # (used by multi-step small-company engine turns).
+    _suppress_day_advance: bool = False
 
     @property
     def items(self):
@@ -120,6 +125,8 @@ class World:
             raise ActionError("Need at least one city")
         if config.ai_company_count < 0:
             raise ActionError("ai_company_count cannot be negative")
+        if config.small_companies_per_city < 0:
+            raise ActionError("small_companies_per_city cannot be negative")
 
         content = GameContent.load()
         centers = place_city_seeds(config.map_size, config.starting_cities)
@@ -200,6 +207,12 @@ class World:
                     }
                 ),
             )
+
+        # Engine-scripted small companies around each City Hall + startup roads
+        from company_sim.small_companies import spawn_small_companies, wire_startup_roads
+
+        spawn_small_companies(world)
+        wire_startup_roads(world)
 
         world._seed_market()
         assert world.mailboxes is not None
@@ -325,7 +338,7 @@ class World:
             return
 
         for company in self.companies.values():
-            if company.is_player:
+            if company.is_player or company.is_small:
                 continue
             for item_id, qty, price in (("iron_ore", 2, 9), ("coal", 2, 7)):
                 if company.inventory.get(item_id) < qty:
@@ -417,6 +430,8 @@ class World:
         self.persistence.save_all(self)
 
     def _maybe_advance_day(self) -> None:
+        if self._suppress_day_advance:
+            return
         companies = self.iter_companies()
         if not companies:
             return
@@ -1713,6 +1728,7 @@ class World:
                 "map_size": self.config.map_size,
                 "starting_cities": self.config.starting_cities,
                 "ai_company_count": self.config.ai_company_count,
+                "small_companies_per_city": self.config.small_companies_per_city,
                 "road_build_cost": self.config.road_build_cost,
                 "road_build_steel": self.config.road_build_steel,
                 "llm_debug": self.config.llm_debug,
