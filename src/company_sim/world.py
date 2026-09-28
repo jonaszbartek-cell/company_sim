@@ -29,7 +29,8 @@ class WorldConfig:
     starting_cities: int = 1
     ai_company_count: int = 2
     player_starting_cash: int = 2500
-    road_build_cost: int = 50
+    road_build_cost: int = 50  # legacy cash cost (unused; roads cost steel)
+    road_build_steel: int = 1  # placeholder: steel consumed per edge road
     min_seconds_between_turns: float = 1.5
     save_dir: str | None = None
     # Deprecated aliases (tests / older callers); folded into map_size in __post_init__
@@ -378,7 +379,11 @@ class World:
         )
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int, side: str) -> ActionResult:
-        """Build a road on one side (N/E/S/W) of an owned plot — this plot only."""
+        """Build a road on one side (N/E/S/W) of an owned plot — this plot only.
+
+        Placeholder cost: consumes road_build_steel steel from the owner's inventory
+        (goods are deleted / removed from stock).
+        """
         actor = self.get_actor(actor_kind, actor_id)
         side = side.upper()
         if side not in SIDES:
@@ -388,19 +393,23 @@ class World:
             raise ActionError("Not a plot")
         if not tile.plot.owned_by(actor_kind, actor_id):
             raise ActionError("You must own the plot to build a road on its edge")
-        cost = self.config.road_build_cost
-        if actor.cash < cost:
-            raise ActionError("Not enough cash")
+        steel_cost = int(self.config.road_build_steel)
+        if steel_cost < 0:
+            raise ActionError("Invalid road steel cost")
+        if actor.inventory.get("steel") < steel_cost:
+            raise ActionError(f"Need {steel_cost} steel to build a road (have {actor.inventory.get('steel')})")
         try:
             self.grid.build_edge_road(x, y, side)
         except ValueError as exc:
             raise ActionError(str(exc)) from exc
-        actor.cash -= cost
+        # Consume / delete construction goods
+        if steel_cost:
+            actor.inventory.add("steel", -steel_cost)
         self.note_actor_action(actor_kind, actor_id)
         return ActionResult(
             True,
-            f"Built road on {side} side of ({x},{y})",
-            {"cost": cost, "side": side, "x": x, "y": y},
+            f"Built road on {side} side of ({x},{y}) (−{steel_cost} steel)",
+            {"steel_cost": steel_cost, "side": side, "x": x, "y": y},
         )
 
     def city_build_road(self, city_id: str, x: int, y: int, side: str) -> ActionResult:
@@ -1335,6 +1344,7 @@ class World:
                 "starting_cities": self.config.starting_cities,
                 "ai_company_count": self.config.ai_company_count,
                 "road_build_cost": self.config.road_build_cost,
+                "road_build_steel": self.config.road_build_steel,
             },
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),

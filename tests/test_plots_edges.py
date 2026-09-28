@@ -42,14 +42,33 @@ def test_edge_road_only_on_this_plot_not_neighbor():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), cities=1, size=4)
         city = next(iter(w.grid.cities.values()))
+        city.inventory.set("steel", 5)
         tile = w.grid.get(1, 1)
         assert tile.plot and tile.plot.owned_by("city", city.id)
+        before = city.inventory.get("steel")
         w.build_road("city", city.id, 1, 1, "E")
         assert tile.plot.roads["E"] is True
+        assert city.inventory.get("steel") == before - 1  # steel consumed
         # Neighbor is untouched — road is only on this plot's edge
         east = w.grid.get(2, 1)
         assert east.plot and east.plot.roads["W"] is False
         assert east.plot.roads["E"] is False
+
+
+def test_build_road_requires_steel_and_deletes_it():
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), cities=1, size=4)
+        city = next(iter(w.grid.cities.values()))
+        city.inventory.set("steel", 0)
+        try:
+            w.build_road("city", city.id, 1, 1, "N")
+            assert False, "expected ActionError"
+        except ActionError as exc:
+            assert "steel" in exc.message.lower()
+        city.inventory.set("steel", 2)
+        w.build_road("city", city.id, 1, 1, "N")
+        assert city.inventory.get("steel") == 1
+        assert w.grid.get(1, 1).plot.roads["N"] is True
 
 
 def test_agent_build_road_tool_chooses_side():
@@ -59,22 +78,26 @@ def test_agent_build_road_tool_chooses_side():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), cities=1, ai=0, size=4)
         city = next(iter(w.grid.cities.values()))
+        city.inventory.set("steel", 3)
         ex = ToolExecutor(w, city)
         r = ex.execute("build_road", {"x": 1, "y": 1, "side": "S"})
         assert r["ok"] is True
         assert r["data"]["side"] == "S"
+        assert r["data"]["steel_cost"] == 1
         plot = w.grid.get(1, 1).plot
         assert plot and plot.roads["S"] is True
         # Only S on this plot
         assert plot.roads["N"] is False
         south = w.grid.get(1, 2).plot
         assert south and south.roads["N"] is False
+        assert city.inventory.get("steel") == 2
 
 
 def test_combine_flags_only_no_disappear_forbids_road_between():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), cities=1, size=4)
         city = next(iter(w.grid.cities.values()))
+        city.inventory.set("steel", 5)
         a = w.grid.get(1, 1)
         b = w.grid.get(2, 1)
         assert a.plot and b.plot
@@ -93,6 +116,7 @@ def test_cannot_combine_across_road():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), cities=1, size=4)
         city = next(iter(w.grid.cities.values()))
+        city.inventory.set("steel", 5)
         w.build_road("city", city.id, 1, 1, "E")
         with pytest.raises(ActionError, match="road"):
             w.merge_plots("city", city.id, 1, 1, 2, 1)

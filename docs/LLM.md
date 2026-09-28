@@ -57,7 +57,7 @@ Without `COMPANY_SIM_LLM=1`, AI uses heuristics (game still runs).
 | `propose_sell` / `propose_buy` | Direct goods AGENT↔AGENT proposals |
 | `list_proposals` / `accept_proposal` / `reject_proposal` | Resolve any direct proposal |
 | `set_production_method` | Choose recipe |
-| `build_road` (side N/E/S/W) / `merge_plots` | Edge roads + combine flags |
+| `build_road` (side N/E/S/W) / `merge_plots` | Edge roads (cost 1 steel) + combine flags |
 | `list_contacts` / `read_mail` / `send_message` | Mail |
 | `post_government_contract` / `award` / `cancel` | CITY procurement |
 | `bid_government_contract` / `fulfill_government_contract` | COMPANY fulfillment |

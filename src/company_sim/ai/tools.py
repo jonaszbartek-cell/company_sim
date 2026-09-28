@@ -371,7 +371,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
             "description": (
                 "Build a road on ONE side of a plot you own. "
                 "Choose side: N, E, S, or W — only that plot's edge becomes a road "
-                "(the adjacent plot is unchanged). Forbidden on a combined side."
+                "(the adjacent plot is unchanged). Costs 1 steel (placeholder; goods are consumed). "
+                "Forbidden on a combined side."
             ),
             "parameters": {
                 "type": "object",
@@ -611,6 +612,7 @@ class ToolExecutor:
                         for t in candidates[:limit]
                     ],
                     "road_build_cost": self.world.config.road_build_cost,
+                    "road_build_steel": self.world.config.road_build_steel,
                 },
             }
 

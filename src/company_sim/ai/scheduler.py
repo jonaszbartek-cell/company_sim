@@ -230,7 +230,8 @@ class AIScheduler:
                     return
 
         candidates = self._edge_road_candidates(world, "city", city.id)
-        if candidates and city.cash >= world.config.road_build_cost:
+        steel_need = world.config.road_build_steel
+        if candidates and city.inventory.get("steel") >= steel_need:
             x, y, side = candidates[0]
             try:
                 world.city_build_road(city.id, x, y, side)
