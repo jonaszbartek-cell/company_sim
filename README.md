@@ -41,10 +41,13 @@ PYTHONPATH=src python -m company_sim
 - Day advances when all companies have acted
 - Text saves under `saves/` for LLM context
 
-### Controls
+### Controls (player = company agent tools)
 
-- Propose buy/sell plot → Accept / Reject proposals
-- Build / Produce / Road (pick side) / Combine
-- Market: Buy 1 iron / Sell 1 steel
-- Mail: pick contact → send message
+- Plot: propose buy/sell, build (choose building), set production method, produce, road (N/E/S/W), combine
+- Plots for sale: cheapest others-owned plots (same as agent `list_plots_for_sale`)
+- Proposals: accept / reject (incl. cancel as proposer)
+- Direct goods: propose sell / propose buy
+- Market: buy now, post sell, post buy order, retract sell/buy
+- Government contracts: bid / fulfill (city post/award/cancel are city-only)
+- Mail: contacts + send / read
 - Pass day / Pause
