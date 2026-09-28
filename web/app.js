@@ -39,11 +39,34 @@ function itemArt(itemId) {
   return artUrl(hit?.art, "good", itemId);
 }
 
-function buildingArt(buildingId, kind = "map") {
+function buildingArt(buildingId, kind = "map", fw = 1, fh = 1) {
   const buildings = state?.content?.buildings || [];
   const hit = buildings.find((b) => b.id === buildingId);
-  const path = kind === "ui" ? hit?.art?.ui : hit?.art?.map;
-  return artUrl(path, kind === "ui" ? "building-ui" : "building-map", buildingId);
+  if (kind === "ui") {
+    return artUrl(hit?.art?.ui, "building-ui", buildingId);
+  }
+  const w = Math.max(1, Math.min(9, fw || 1));
+  const h = Math.max(1, Math.min(9, fh || 1));
+  return `/static/assets/buildings/map/${buildingId}_${w}x${h}.svg`;
+}
+
+function terrainArt(plotType) {
+  if (plotType === "specialized") return "/static/assets/terrain/grass_specialized.svg";
+  return "/static/assets/terrain/grass.svg";
+}
+
+function roadArt(mask) {
+  return `/static/assets/roads/mask_${mask | 0}.svg`;
+}
+
+function roadMaskFromPlot(plot) {
+  if (!plot?.roads) return 0;
+  let m = 0;
+  if (plot.roads.N) m |= 1;
+  if (plot.roads.E) m |= 2;
+  if (plot.roads.S) m |= 4;
+  if (plot.roads.W) m |= 8;
+  return m;
 }
 
 function renderIconList(el, entries, emptyText) {
@@ -155,15 +178,6 @@ function isPlayerOwned(plot) {
   return plot && plot.owner_kind === "company" && plot.owner_id === state.player_company_id;
 }
 
-function drawEdgeRoad(px, py, side, size) {
-  const t = Math.max(2, Math.floor(size * 0.12));
-  ctx.fillStyle = "#8a949e";
-  if (side === "N") ctx.fillRect(px + 1, py + 1, size - 2, t);
-  if (side === "S") ctx.fillRect(px + 1, py + size - 1 - t, size - 2, t);
-  if (side === "W") ctx.fillRect(px + 1, py + 1, t, size - 2);
-  if (side === "E") ctx.fillRect(px + size - 1 - t, py + 1, t, size - 2);
-}
-
 function drawCombineMark(px, py, side, size) {
   ctx.strokeStyle = "rgba(125, 209, 255, 0.85)";
   ctx.lineWidth = 2;
@@ -184,6 +198,12 @@ function drawCombineMark(px, py, side, size) {
   }
   ctx.stroke();
   ctx.lineWidth = 1;
+}
+
+function drawImageFit(img, x, y, w, h) {
+  if (!img || !img.complete || img.naturalWidth <= 0) return false;
+  ctx.drawImage(img, x, y, w, h);
+  return true;
 }
 
 function draw() {
@@ -209,37 +229,47 @@ function draw() {
   }
   ctx.stroke();
 
+  const drawnBuildingIds = new Set();
+
   for (const t of state.map.tiles) {
     const px = ox + t.x * cellSize;
     const py = oy + t.y * cellSize;
     if (!t.plot) continue;
 
-    if (t.plot.building) ctx.fillStyle = "#c47a4a";
-    else if (isPlayerOwned(t.plot)) ctx.fillStyle = "#2f8f6b";
-    else if (t.plot.owner_kind === "city") ctx.fillStyle = "#7a6a3a";
-    else if (t.plot.owner_kind === "company") ctx.fillStyle = "#6b3f5a";
-    else if (t.plot.plot_type === "specialized") ctx.fillStyle = "#4a6b3f";
-    else ctx.fillStyle = "#3f6b4f";
-    ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    // Grass / specialized terrain
+    const grass = loadArt(terrainArt(t.plot.plot_type));
+    if (!drawImageFit(grass, px + 1, py + 1, cellSize - 2, cellSize - 2)) {
+      ctx.fillStyle = t.plot.plot_type === "specialized" ? "#4a6b3f" : "#3f6b4f";
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    }
+
+    // Ownership tint
+    if (isPlayerOwned(t.plot)) {
+      ctx.fillStyle = "rgba(47, 143, 107, 0.22)";
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    } else if (t.plot.owner_kind === "city") {
+      ctx.fillStyle = "rgba(122, 106, 58, 0.18)";
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    } else if (t.plot.owner_kind === "company") {
+      ctx.fillStyle = "rgba(107, 63, 90, 0.18)";
+      ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
+    }
 
     if (t.city_id) {
       const idx = state.map.cities.findIndex((c) => c.id === t.city_id);
       const hues = [210, 140, 30, 300, 0];
       const h = hues[(idx >= 0 ? idx : 0) % hues.length];
-      ctx.fillStyle = `hsla(${h}, 40%, 50%, 0.08)`;
+      ctx.fillStyle = `hsla(${h}, 40%, 50%, 0.06)`;
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
 
-    if (t.plot.plot_type === "specialized" && !t.plot.building) {
-      ctx.fillStyle = "rgba(255,220,120,0.35)";
-      ctx.fillRect(px + 2, py + 2, 3, 3);
+    // Roads / crossroads via mask art
+    const mask = t.road_mask != null ? t.road_mask : roadMaskFromPlot(t.plot);
+    if (mask) {
+      const roadImg = loadArt(roadArt(mask));
+      drawImageFit(roadImg, px, py, cellSize, cellSize);
     }
 
-    if (t.plot.roads) {
-      for (const side of ["N", "E", "S", "W"]) {
-        if (t.plot.roads[side]) drawEdgeRoad(px, py, side, cellSize);
-      }
-    }
     if (t.plot.combined) {
       for (const side of Object.keys(t.plot.combined)) {
         drawCombineMark(px, py, side, cellSize);
@@ -253,18 +283,30 @@ function draw() {
       ctx.fillStyle = "rgba(240, 180, 60, 0.35)";
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
+
+    // Multi-plot building: draw once from anchor spanning footprint
     if (t.plot.building) {
-      const bid = t.plot.building.building_id || t.plot.building.building_type;
-      const url = buildingArt(bid, "map");
-      const img = loadArt(url);
-      const pad = Math.max(2, Math.floor(cellSize * 0.12));
-      if (img && img.complete && img.naturalWidth > 0) {
-        ctx.drawImage(img, px + pad, py + pad, cellSize - pad * 2, cellSize - pad * 2);
-      } else {
-        ctx.fillStyle = "#1a1008";
-        ctx.font = `${Math.max(9, cellSize * 0.35)}px sans-serif`;
-        const label = (bid || "B").slice(0, 3).toUpperCase();
-        ctx.fillText(label, px + 3, py + cellSize - 3);
+      const b = t.plot.building;
+      const bid = b.building_id || b.building_type;
+      const fw = b.footprint_w || 1;
+      const fh = b.footprint_h || 1;
+      const ax = b.anchor_x != null ? b.anchor_x : t.x;
+      const ay = b.anchor_y != null ? b.anchor_y : t.y;
+      const key = b.id || `${bid}@${ax},${ay}`;
+      if (!drawnBuildingIds.has(key) && t.x === ax && t.y === ay) {
+        drawnBuildingIds.add(key);
+        const url = buildingArt(bid, "map", fw, fh);
+        const img = loadArt(url);
+        const bw = fw * cellSize;
+        const bh = fh * cellSize;
+        const pad = Math.max(1, Math.floor(cellSize * 0.06));
+        if (!drawImageFit(img, ox + ax * cellSize + pad, oy + ay * cellSize + pad, bw - pad * 2, bh - pad * 2)) {
+          ctx.fillStyle = "#c47a4a";
+          ctx.fillRect(ox + ax * cellSize + pad, oy + ay * cellSize + pad, bw - pad * 2, bh - pad * 2);
+          ctx.fillStyle = "#1a1008";
+          ctx.font = `${Math.max(9, cellSize * 0.28)}px sans-serif`;
+          ctx.fillText(`${bid} ${fw}x${fh}`, ox + ax * cellSize + 4, oy + ay * cellSize + cellSize - 4);
+        }
       }
     }
   }

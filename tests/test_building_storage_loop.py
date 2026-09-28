@@ -317,8 +317,71 @@ def test_placeholder_arts_exist_for_catalog():
         assert (root / "goods" / f"{item.id}.svg").is_file(), item.id
         assert item.to_public_dict()["art"].endswith(f"/goods/{item.id}.svg")
     for b in c.buildings.all():
-        assert (root / "buildings" / "map" / f"{b.id}.svg").is_file(), b.id
         assert (root / "buildings" / "ui" / f"{b.id}.svg").is_file(), b.id
+        for w, h in ((1, 1), (3, 1), (2, 2), (9, 9)):
+            assert (root / "buildings" / "map" / f"{b.id}_{w}x{h}.svg").is_file(), f"{b.id}_{w}x{h}"
         art = b.to_public_dict()["art"]
-        assert art["map"].endswith(f"/map/{b.id}.svg")
         assert art["ui"].endswith(f"/ui/{b.id}.svg")
+    assert (root / "terrain" / "grass.svg").is_file()
+    assert (root / "terrain" / "grass_specialized.svg").is_file()
+    for mask in range(16):
+        assert (root / "roads" / f"mask_{mask}.svg").is_file()
+
+
+def test_combine_empty_and_same_building_expands_footprint():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        # Claim a 1x2 strip
+        for x, y in ((1, 1), (2, 1)):
+            w.grid.get(x, y).plot.claim("company", "player")
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 30)
+        player.cash = 5000
+        # Empty combine OK
+        r = w.merge_plots("company", "player", 1, 1, 2, 1)
+        assert r.ok
+        assert w.grid.group_size(1, 1) == 2
+        # Build spans both
+        built = w.build_building("company", "player", 1, 1, "foundry")
+        assert built.ok, built.message
+        b = w.grid.get(1, 1).plot.building
+        assert b.footprint_w == 2 and b.footprint_h == 1
+        assert w.grid.get(2, 1).plot.building is b
+        assert b.map_art_path().endswith("foundry_2x1.svg")
+
+
+def test_combine_rejects_different_buildings():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        for x, y in ((1, 1), (2, 1)):
+            w.grid.get(x, y).plot.claim("company", "player")
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 40)
+        player.cash = 5000
+        w.build_building("company", "player", 1, 1, "foundry")
+        w.build_building("company", "player", 2, 1, "refinery")
+        with pytest.raises(ActionError, match="same building"):
+            w.merge_plots("company", "player", 1, 1, 2, 1)
+
+
+def test_combine_same_building_merges_storage_and_size():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        for x, y in ((1, 1), (2, 1)):
+            w.grid.get(x, y).plot.claim("company", "player")
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 40)
+        player.cash = 5000
+        w.build_building("company", "player", 1, 1, "foundry")
+        w.build_building("company", "player", 2, 1, "foundry")
+        player.inventory.set("coal", 2)
+        w.deposit_to_building("company", "player", 1, 1, "coal", 1)
+        player.acted_this_day = False
+        w.deposit_to_building("company", "player", 2, 1, "coal", 1)
+        player.acted_this_day = False
+        r = w.merge_plots("company", "player", 1, 1, 2, 1)
+        assert r.ok, r.message
+        b = w.grid.get(1, 1).plot.building
+        assert b is w.grid.get(2, 1).plot.building
+        assert b.footprint_w == 2 and b.footprint_h == 1
+        assert b.storage.get("coal") == 2

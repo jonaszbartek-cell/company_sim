@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Iterator
 
 from company_sim.actors import City
+from company_sim.buildings import Building
 from company_sim.items import Inventory
 from company_sim.plots import (
     OPPOSITE,
@@ -22,6 +23,28 @@ class Tile:
     y: int
     city_id: str | None = None  # administrative territory / starting owner city
     plot: Plot | None = None
+
+
+MAX_BUILDING_FOOTPRINT = 9  # max width or height in plots
+
+
+def group_bounds(cells: list[tuple[int, int]]) -> tuple[int, int, int, int]:
+    """Return (min_x, min_y, width, height) for a set of cells."""
+    xs = [c[0] for c in cells]
+    ys = [c[1] for c in cells]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    return min_x, min_y, max_x - min_x + 1, max_y - min_y + 1
+
+
+def is_filled_rectangle(cells: list[tuple[int, int]]) -> bool:
+    if not cells:
+        return False
+    min_x, min_y, w, h = group_bounds(cells)
+    if len(cells) != w * h:
+        return False
+    needed = {(x, y) for x in range(min_x, min_x + w) for y in range(min_y, min_y + h)}
+    return set(cells) == needed
 
 
 @dataclass
@@ -97,7 +120,12 @@ class GridMap:
         tile.plot.roads[side] = True
 
     def combine_plots(self, x1: int, y1: int, x2: int, y2: int, owner_kind: str, owner_id: str) -> None:
-        """Flag two adjacent plots as combined across their shared edge. Plots stay."""
+        """Combine two adjacent owned plots.
+
+        Allowed when both are empty, one is empty + one has a building (expand),
+        or both have the *same* building_id (merge). Groups that contain a
+        building must stay a filled rectangle ≤9×9.
+        """
         a = self.get(x1, y1)
         b = self.get(x2, y2)
         if not a.plot or not b.plot:
@@ -114,8 +142,97 @@ class GridMap:
             raise ValueError("Already combined on that side")
         if a.plot.reserved_proposal_id or b.plot.reserved_proposal_id:
             raise ValueError("Plot is reserved by a pending proposal")
+
+        ba = a.plot.building
+        bb = b.plot.building
+        if ba and bb and ba.building_id != bb.building_id:
+            raise ValueError("Can only combine plots with the same building type")
+
+        # Tentatively combine, then validate resulting group
         a.plot.combined[side_a] = b.plot.id
         b.plot.combined[side_b] = a.plot.id
+        try:
+            self._validate_and_sync_building_group(x1, y1)
+        except ValueError:
+            a.plot.combined[side_a] = None
+            b.plot.combined[side_b] = None
+            raise
+
+    def _validate_and_sync_building_group(self, x: int, y: int) -> None:
+        """After a combine, ensure building rules and sync footprint/instances."""
+        cells = self.combined_group(x, y)
+        buildings = []
+        for cx, cy in cells:
+            plot = self.get(cx, cy).plot
+            if plot and plot.building:
+                buildings.append((cx, cy, plot.building))
+
+        if not buildings:
+            return  # empty group — any connected shape ok
+
+        types = {b.building_id for _, _, b in buildings}
+        if len(types) > 1:
+            raise ValueError("Combined group cannot mix different buildings")
+        if not is_filled_rectangle(cells):
+            raise ValueError("Plots with a building must form a filled rectangle")
+        min_x, min_y, w, h = group_bounds(cells)
+        if w > MAX_BUILDING_FOOTPRINT or h > MAX_BUILDING_FOOTPRINT:
+            raise ValueError(f"Building footprint cannot exceed {MAX_BUILDING_FOOTPRINT}×{MAX_BUILDING_FOOTPRINT}")
+
+        # Merge into one shared Building instance across the rectangle
+        unique: dict[str, object] = {}
+        for _, _, b in buildings:
+            unique[b.id] = b
+        primary = next(iter(unique.values()))
+        for other in list(unique.values())[1:]:
+            # Merge storage quantities into primary
+            for item_id, qty in other.storage.as_dict().items():
+                if qty:
+                    primary.storage.add(item_id, qty)
+            if not primary.production_method_id and other.production_method_id:
+                primary.production_method_id = other.production_method_id
+            # Keep capacity union
+            for item_id, cap in other.storage_capacity.items():
+                primary.storage_capacity.setdefault(item_id, cap)
+                primary.storage.reserve_slots([item_id])
+
+        primary.footprint_w = w
+        primary.footprint_h = h
+        primary.anchor_x = min_x
+        primary.anchor_y = min_y
+        for cx, cy in cells:
+            self.get(cx, cy).plot.building = primary
+
+    def place_building_on_group(self, x: int, y: int, building: Building) -> tuple[int, int, int, int]:
+        """Place the same building instance on every cell of a rectangular group."""
+        cells = self.combined_group(x, y) or [(x, y)]
+        if not is_filled_rectangle(cells):
+            raise ValueError("Building requires a filled rectangular plot group")
+        min_x, min_y, w, h = group_bounds(cells)
+        if w > MAX_BUILDING_FOOTPRINT or h > MAX_BUILDING_FOOTPRINT:
+            raise ValueError(f"Building footprint cannot exceed {MAX_BUILDING_FOOTPRINT}×{MAX_BUILDING_FOOTPRINT}")
+        for cx, cy in cells:
+            plot = self.get(cx, cy).plot
+            if not plot:
+                raise ValueError("Missing plot in group")
+            if plot.building is not None and plot.building is not building:
+                raise ValueError("Plot already has a building")
+        building.footprint_w = w
+        building.footprint_h = h
+        building.anchor_x = min_x
+        building.anchor_y = min_y
+        for cx, cy in cells:
+            assert self.get(cx, cy).plot is not None
+            self.get(cx, cy).plot.building = building  # type: ignore[union-attr]
+        return min_x, min_y, w, h
+
+    def clear_building_from_group(self, x: int, y: int) -> None:
+        """Remove building from every plot in the combined group."""
+        cells = self.combined_group(x, y) or [(x, y)]
+        for cx, cy in cells:
+            plot = self.get(cx, cy).plot
+            if plot:
+                plot.building = None
 
     def clear_combines_at(self, x: int, y: int) -> None:
         """Break all combine flags involving this plot (e.g. after ownership transfer)."""
@@ -135,6 +252,18 @@ class GridMap:
                 opp = OPPOSITE[side]
                 if other.combined.get(opp) == tile.plot.id:
                     other.combined[opp] = None
+
+    def road_mask_at(self, x: int, y: int) -> int:
+        """Bitmask of edge roads on this plot: N=1 E=2 S=4 W=8."""
+        tile = self.get(x, y)
+        if not tile.plot:
+            return 0
+        bits = {"N": 1, "E": 2, "S": 4, "W": 8}
+        mask = 0
+        for side, bit in bits.items():
+            if tile.plot.roads.get(side):
+                mask |= bit
+        return mask
 
     def combined_group(self, x: int, y: int) -> list[tuple[int, int]]:
         """Connected component via combine flags."""
@@ -184,6 +313,7 @@ class GridMap:
                     "y": t.y,
                     "kind": "plot",
                     "city_id": t.city_id,
+                    "road_mask": self.road_mask_at(t.x, t.y),
                     "plot": None
                     if t.plot is None
                     else t.plot.to_public_dict(
