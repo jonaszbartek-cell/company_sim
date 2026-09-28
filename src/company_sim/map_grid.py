@@ -147,6 +147,34 @@ class GridMap:
         bb = b.plot.building
         if ba and bb and ba.building_id != bb.building_id:
             raise ValueError("Can only combine plots with the same building type")
+        if ba and bb:
+            # Mine/Rig (locked-method buildings): merge requires identical methods
+            if (
+                ba.production_method_locked
+                or bb.production_method_locked
+                or ba.building_id in ("mine", "rig")
+            ):
+                if ba.production_method_id != bb.production_method_id:
+                    raise ValueError(
+                        "Can only combine mine/rig plots with the same production method"
+                    )
+        # Expanding a building onto an empty plot must respect allowed plot types
+        expanding = None
+        empty_plot = None
+        if ba and not bb:
+            expanding, empty_plot = ba, b.plot
+        elif bb and not ba:
+            expanding, empty_plot = bb, a.plot
+        if expanding is not None and empty_plot is not None:
+            allowed = _allowed_plot_types_for_building(expanding.building_id)
+            if empty_plot.plot_type.value not in allowed and not (
+                "specialized" in allowed
+                and empty_plot.plot_type.value
+                in ("specialized_mine", "specialized_well", "specialized")
+            ):
+                raise ValueError(
+                    f"{expanding.building_id} cannot expand onto {empty_plot.plot_type.value} plots"
+                )
 
         # Tentatively combine, then validate resulting group
         a.plot.combined[side_a] = b.plot.id
@@ -191,6 +219,8 @@ class GridMap:
                     primary.storage.add(item_id, qty)
             if not primary.production_method_id and other.production_method_id:
                 primary.production_method_id = other.production_method_id
+            if getattr(other, "production_method_locked", False):
+                primary.production_method_locked = True
             # Keep capacity union
             for item_id, cap in other.storage_capacity.items():
                 primary.storage_capacity.setdefault(item_id, cap)
@@ -326,15 +356,125 @@ class GridMap:
         }
 
 
+def _allowed_plot_types_for_building(building_id: str) -> tuple[str, ...]:
+    """Best-effort allowed plot types without requiring a World."""
+    if building_id == "mine":
+        return ("specialized_mine",)
+    if building_id == "rig":
+        return ("specialized_well",)
+    return ("standard", "specialized_mine", "specialized_well")
+
+
+def plan_specialized_plots(
+    width: int,
+    height: int,
+    *,
+    percent: float = 15.0,
+    min_each: int = 5,
+    seed: int | None = None,
+) -> dict[tuple[int, int], PlotType]:
+    """
+    Choose clustered specialized_mine / specialized_well cells.
+
+    - ``percent`` of all plots become specialized (split across both types).
+    - At least ``min_each`` of each type when the map has room (clamped on tiny maps).
+    - Plots are placed in regional clusters with optional small gaps (not always adjacent).
+    """
+    import random
+
+    n = width * height
+    if n <= 0:
+        return {}
+    rng = random.Random(seed if seed is not None else (width * 10007 + height * 17 + int(percent * 10)))
+    cells = [(x, y) for y in range(height) for x in range(width)]
+    pct = max(0.0, min(100.0, float(percent)))
+    target_total = int(round(n * pct / 100.0))
+    capacity_each = n // 2
+    guarantee = min(int(min_each), capacity_each)
+    target_total = max(target_total, guarantee * 2)
+    target_total = min(target_total, n)
+    n_mine = max(guarantee, target_total // 2)
+    n_well = max(guarantee, target_total - n_mine)
+    while n_mine + n_well > n:
+        if n_mine > n_well and n_mine > 0:
+            n_mine -= 1
+        elif n_well > 0:
+            n_well -= 1
+        else:
+            break
+
+    def _place(count: int, taken: set[tuple[int, int]]) -> set[tuple[int, int]]:
+        if count <= 0:
+            return set()
+        available = [c for c in cells if c not in taken]
+        if not available:
+            return set()
+        n_clusters = max(1, min(count, int(count ** 0.5)))
+        rng.shuffle(available)
+        min_sep = max(2, min(width, height) // max(3, n_clusters + 1))
+        centers: list[tuple[int, int]] = []
+        for c in available:
+            if all(abs(c[0] - cx) + abs(c[1] - cy) >= min_sep for cx, cy in centers):
+                centers.append(c)
+            if len(centers) >= n_clusters:
+                break
+        while len(centers) < n_clusters:
+            centers.append(available[len(centers) % len(available)])
+
+        radius = max(2, int((count / max(1, n_clusters)) ** 0.5) + 2)
+        chosen: set[tuple[int, int]] = set()
+        for cx, cy in centers:
+            nearby = [
+                c
+                for c in available
+                if c not in chosen and abs(c[0] - cx) + abs(c[1] - cy) <= radius
+            ]
+            nearby.sort(key=lambda c: abs(c[0] - cx) + abs(c[1] - cy))
+            for i, c in enumerate(nearby):
+                if len(chosen) >= count:
+                    break
+                # Leave occasional gaps inside the cluster region
+                if i == 0 or rng.random() < 0.7:
+                    chosen.add(c)
+            if len(chosen) >= count:
+                break
+        if len(chosen) < count:
+            leftovers = sorted(
+                [c for c in available if c not in chosen],
+                key=lambda c: min(abs(c[0] - cx) + abs(c[1] - cy) for cx, cy in centers),
+            )
+            for c in leftovers:
+                if len(chosen) >= count:
+                    break
+                chosen.add(c)
+        return chosen
+
+    mine_cells = _place(n_mine, set())
+    well_cells = _place(n_well, mine_cells)
+    out: dict[tuple[int, int], PlotType] = {}
+    for c in mine_cells:
+        out[c] = PlotType.SPECIALIZED_MINE
+    for c in well_cells:
+        out[c] = PlotType.SPECIALIZED_WELL
+    return out
+
+
 def generate_map(
     size: int,
     city_seeds: list[tuple[str, str, int, int, int]],
+    *,
+    specialized_plot_percent: float = 15.0,
+    specialized_seed: int | None = None,
 ) -> GridMap:
     """
     Build an NxN grid of square plots only.
 
     city_seeds: (id, name, center_x, center_y, population)
     Territory is assigned by nearest city center; ownership is applied by World.
+
+    Specialized resource plots (mine / well) are placed in clusters according to
+    ``specialized_plot_percent`` of all cells, with a guaranteed minimum of each
+    type when the map is large enough.
     """
     if size < 2:
         raise ValueError("Map size must be at least 2")
@@ -362,11 +502,19 @@ def generate_map(
             ),
         )
 
+    specialized = plan_specialized_plots(
+        size,
+        size,
+        percent=specialized_plot_percent,
+        min_each=5,
+        seed=specialized_seed,
+    )
+
     # Equal-ish division: assign every cell to nearest city seed
     for tile in grid.tiles:
         tile.city_id = _nearest_city_id(grid, tile.x, tile.y)
-        ptype = PlotType.SPECIALIZED if ((tile.x * 17 + tile.y * 31) % 7 == 0) else PlotType.STANDARD
-        value = 150 if ptype == PlotType.SPECIALIZED else 100
+        ptype = specialized.get((tile.x, tile.y), PlotType.STANDARD)
+        value = 150 if ptype != PlotType.STANDARD else 100
         tile.plot = Plot(plot_type=ptype, value=value)
 
     grid.rebuild_plot_index()
@@ -413,6 +561,7 @@ __all__ = [
     "Tile",
     "GridMap",
     "generate_map",
+    "plan_specialized_plots",
     "place_city_seeds",
     "Plot",
     "PlotType",

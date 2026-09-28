@@ -35,6 +35,8 @@ class WorldConfig:
     min_seconds_between_turns: float = 1.5
     save_dir: str | None = None
     llm_debug: bool = False  # write per-turn LLM traces under saves/llm_debug/
+    # Percentage of plots that are specialized (mine + well clusters); ≥5 of each when map allows
+    specialized_plot_percent: float = 15.0
     # If > 0, seed market with this many of EVERY catalog item at market_seed_price
     market_seed_qty: int = 0
     market_seed_price: int = 1
@@ -48,6 +50,11 @@ class WorldConfig:
             h = self.map_height if self.map_height is not None else self.map_size
             self.map_size = max(int(w), int(h))
         self.map_size = int(self.map_size)
+        self.specialized_plot_percent = float(self.specialized_plot_percent)
+        if self.specialized_plot_percent < 0:
+            self.specialized_plot_percent = 0.0
+        if self.specialized_plot_percent > 100:
+            self.specialized_plot_percent = 100.0
 
     @property
     def map_w(self) -> int:
@@ -124,7 +131,11 @@ class World:
                 name = f"{name} {i+1}"
             seeds.append((cid, name, cx, cy, 1000 + i * 50))
 
-        grid = generate_map(config.map_size, city_seeds=seeds)
+        grid = generate_map(
+            config.map_size,
+            city_seeds=seeds,
+            specialized_plot_percent=config.specialized_plot_percent,
+        )
         save_root = Path(config.save_dir) if config.save_dir else default_save_dir()
         file_store = AgentFileStore(save_root)
         llm_debug_log = LLMDebugLog(save_root, enabled=bool(config.llm_debug))
@@ -390,6 +401,7 @@ class World:
         x: int,
         y: int,
         building_id: str = "foundry",
+        method_id: str | None = None,
     ) -> ActionResult:
         actor = self.get_actor(owner_kind, owner_id)
         tile = self.grid.get(x, y)
@@ -419,7 +431,19 @@ class World:
             )
 
         methods = self.content.methods_for_building(building_id)
-        method_id = methods[0].id if methods else None
+        chosen = method_id
+        if chosen is None:
+            chosen = methods[0].id if methods else None
+        elif methods:
+            try:
+                method = self.production.get(chosen)
+            except KeyError as exc:
+                raise ActionError(f"Unknown method: {chosen}") from exc
+            if method.building_id != building_id:
+                raise ActionError(f"{chosen} cannot run in {building_id}")
+        elif chosen is not None:
+            raise ActionError(f"Unknown method: {chosen}")
+
         actor.cash -= bdef.build_cost
         if bdef.build_cost_items:
             actor.inventory.consume(bdef.build_cost_items)
@@ -427,7 +451,8 @@ class World:
             building_id=building_id,
             owner_kind=owner_kind,
             owner_id=owner_id,
-            production_method_id=method_id,
+            production_method_id=chosen,
+            production_method_locked=bool(bdef.locks_production_method),
             status="idle",
             storage=Inventory(),
             anchor_x=x,
@@ -452,7 +477,8 @@ class World:
                 "cost": bdef.build_cost,
                 "cost_items": dict(bdef.build_cost_items),
                 "building_id": building_id,
-                "production_method_id": method_id,
+                "production_method_id": chosen,
+                "production_method_locked": bool(building.production_method_locked),
                 "storage": building.storage.as_dict(),
                 "storage_capacity": dict(building.storage_capacity),
                 "footprint_w": fw,
@@ -476,6 +502,11 @@ class World:
         b = tile.plot.building
         if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
+        if b.production_method_locked:
+            raise ActionError(
+                f"{b.building_id} production method is locked "
+                f"({b.production_method_id}) and cannot be changed"
+            )
         try:
             method = self.production.get(method_id)
         except KeyError as exc:
@@ -1637,6 +1668,7 @@ class World:
                 "road_build_cost": self.config.road_build_cost,
                 "road_build_steel": self.config.road_build_steel,
                 "llm_debug": self.config.llm_debug,
+                "specialized_plot_percent": self.config.specialized_plot_percent,
             },
             "llm_debug": {
                 "enabled": bool(self.config.llm_debug),

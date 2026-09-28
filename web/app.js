@@ -51,7 +51,12 @@ function buildingArt(buildingId, kind = "map", fw = 1, fh = 1) {
 }
 
 function terrainArt(plotType) {
-  if (plotType === "specialized") return "/static/assets/terrain/grass_specialized.svg";
+  if (plotType === "specialized_mine" || plotType === "specialized") {
+    return "/static/assets/terrain/grass_specialized_mine.svg";
+  }
+  if (plotType === "specialized_well") {
+    return "/static/assets/terrain/grass_specialized_well.svg";
+  }
   return "/static/assets/terrain/grass.svg";
 }
 
@@ -156,6 +161,10 @@ function showSetup(defaults) {
     if (defaults.ai_companies != null) document.getElementById("setup-companies").value = defaults.ai_companies;
     if (defaults.cities != null) document.getElementById("setup-cities").value = defaults.cities;
     if (defaults.map_size != null) document.getElementById("setup-map").value = defaults.map_size;
+    const pctEl = document.getElementById("setup-specialized-pct");
+    if (pctEl && defaults.specialized_plot_percent != null) {
+      pctEl.value = defaults.specialized_plot_percent;
+    }
     if (defaults.llm_debug != null) document.getElementById("setup-llm-debug").checked = !!defaults.llm_debug;
   }
 }
@@ -240,7 +249,13 @@ function draw() {
     // Grass / specialized terrain
     const grass = loadArt(terrainArt(t.plot.plot_type));
     if (!drawImageFit(grass, px + 1, py + 1, cellSize - 2, cellSize - 2)) {
-      ctx.fillStyle = t.plot.plot_type === "specialized" ? "#4a6b3f" : "#3f6b4f";
+      const pt = t.plot.plot_type;
+      ctx.fillStyle =
+        pt === "specialized_well"
+          ? "#3a5a6a"
+          : pt === "specialized_mine" || pt === "specialized"
+            ? "#6a5a3a"
+            : "#3f6b4f";
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
 
@@ -491,6 +506,8 @@ function refreshPanels() {
   const canSell = t && isPlayerOwned(t.plot) && !t.plot.reserved_proposal_id;
   const canBuild = t && isPlayerOwned(t.plot) && !t.plot.building && !t.plot.reserved_proposal_id;
   const canProduce = t && isPlayerOwned(t.plot) && t.plot.building;
+  const canSetMethod =
+    canProduce && t.plot.building && !t.plot.building.production_method_locked;
   const canRoad = t && isPlayerOwned(t.plot);
   let canMerge = false;
   if (lastOwnedClick && t && isPlayerOwned(t.plot) && !(lastOwnedClick.x === selected.x && lastOwnedClick.y === selected.y)) {
@@ -501,7 +518,7 @@ function refreshPanels() {
   btnPlotSell.disabled = !canSell;
   btnBuild.disabled = !canBuild;
   btnProduce.disabled = !canProduce;
-  btnSetMethod.disabled = !canProduce;
+  btnSetMethod.disabled = !canSetMethod;
   btnRoad.disabled = !canRoad;
   btnMerge.disabled = !canMerge;
 }
@@ -530,6 +547,7 @@ setupForm.addEventListener("submit", async (ev) => {
     ai_companies: Number(document.getElementById("setup-companies").value),
     cities: Number(document.getElementById("setup-cities").value),
     map_size: Number(document.getElementById("setup-map").value),
+    specialized_plot_percent: Number(document.getElementById("setup-specialized-pct").value),
     llm_debug: document.getElementById("setup-llm-debug").checked,
   };
   const data = await api("/api/setup", body);
@@ -606,6 +624,7 @@ btnBuild.addEventListener("click", async () => {
   const data = await api("/api/player/build", {
     ...selected,
     building_id: buildId.value || "foundry",
+    method_id: methodId.value || null,
   });
   if (!data.ok) alert(data.message);
 });

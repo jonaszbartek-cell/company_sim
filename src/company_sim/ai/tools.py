@@ -93,13 +93,20 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "build_building",
-            "description": "Build a building on a plot you own (default: foundry).",
+            "description": (
+                "Build on a plot you own. Mine needs specialized_mine; Rig needs "
+                "specialized_well. For mine/rig pass method_id at build (locked after)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
                     "x": {"type": "integer"},
                     "y": {"type": "integer"},
                     "building_id": {"type": "string"},
+                    "method_id": {
+                        "type": "string",
+                        "description": "Production method (required choice for mine/rig; locked after build)",
+                    },
                 },
                 "required": ["x", "y"],
                 "additionalProperties": False,
@@ -806,7 +813,15 @@ class ToolExecutor:
 
         if name == "build_building":
             building_id = str(args.get("building_id", "foundry"))
-            r = self.world.build_building(kind, aid, int(args["x"]), int(args["y"]), building_id)
+            method_id = args.get("method_id")
+            r = self.world.build_building(
+                kind,
+                aid,
+                int(args["x"]),
+                int(args["y"]),
+                building_id,
+                method_id=str(method_id) if method_id else None,
+            )
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "destroy_building":

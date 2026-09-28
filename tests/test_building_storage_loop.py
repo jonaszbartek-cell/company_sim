@@ -328,6 +328,8 @@ def test_placeholder_arts_exist_for_catalog():
         assert art["map"].endswith(f"/map/{b.id}/1x1.svg")
     assert (root / "terrain" / "grass.svg").is_file()
     assert (root / "terrain" / "grass_specialized.svg").is_file()
+    assert (root / "terrain" / "grass_specialized_mine.svg").is_file()
+    assert (root / "terrain" / "grass_specialized_well.svg").is_file()
     for mask in range(16):
         assert (root / "roads" / f"mask_{mask}.svg").is_file()
 
