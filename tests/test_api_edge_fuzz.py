@@ -44,8 +44,15 @@ def test_setup_rejects_out_of_range_values(client):
     assert bad2.status_code == 422
     bad3 = c.post("/api/setup", json={"ai_companies": 1, "cities": 1, "map_size": 1})
     assert bad3.status_code == 422
-    bad4 = c.post("/api/setup", json={"ai_companies": 1, "cities": 1, "map_size": 99})
+    bad4 = c.post("/api/setup", json={"ai_companies": 1, "cities": 1, "map_size": 200})
     assert bad4.status_code == 422
+    # Raised UI/API ceiling: 128x128 square rectangles are allowed
+    ok_big = c.post(
+        "/api/setup",
+        json={"ai_companies": 0, "cities": 1, "map_size": 128, "llm_debug": False},
+    )
+    assert ok_big.status_code == 200
+    assert ok_big.json()["state"]["config"]["map_size"] == 128
 
 
 def test_actions_before_setup_fail(client):

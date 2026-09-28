@@ -209,7 +209,8 @@ function drawImageFit(img, x, y, w, h) {
 function draw() {
   if (!state || !state.map) return;
   const { width, height } = state.map;
-  cellSize = Math.floor(Math.min(canvas.width / width, canvas.height / height));
+  // Keep at least 1px so extreme map sizes never collapse drawing math to zero.
+  cellSize = Math.max(1, Math.floor(Math.min(canvas.width / width, canvas.height / height)));
   const ox = Math.floor((canvas.width - width * cellSize) / 2);
   const oy = Math.floor((canvas.height - height * cellSize) / 2);
 
