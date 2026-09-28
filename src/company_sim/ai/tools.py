@@ -562,6 +562,30 @@ def tool_name(defn: dict[str, Any]) -> str:
     return str(defn["function"]["name"])
 
 
+# Market / company trading tools cities cannot use.
+COMPANY_ONLY_TOOLS = frozenset(
+    {
+        "get_market",
+        "post_sell",
+        "post_buy",
+        "buy_from_market",
+        "retract_sell",
+        "retract_buy",
+        "bid_government_contract",
+        "fulfill_government_contract",
+    }
+)
+
+
+def tool_definitions_for(actor: Actor) -> list[dict[str, Any]]:
+    """Tool schemas exposed to the LLM for this actor's turn."""
+    if actor.kind == "city":
+        skip = COMPANY_ONLY_TOOLS
+    else:
+        skip = CITY_ONLY_TOOLS
+    return [d for d in TOOL_DEFINITIONS if tool_name(d) not in skip]
+
+
 def player_company_tool_definitions() -> list[dict[str, Any]]:
     """Tool schemas a player company can run (same set as company AI agents)."""
     return [d for d in TOOL_DEFINITIONS if tool_name(d) not in PLAYER_EXCLUDED_TOOLS]

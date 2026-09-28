@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from company_sim.actors import Actor, City
 from company_sim.ai.llm_client import LLMClient, parse_tool_calls
 from company_sim.ai.tools import (
-    TOOL_DEFINITIONS,
     ToolExecutor,
     build_actor_context,
     system_prompt_for,
@@ -130,9 +129,13 @@ class AIScheduler:
 
         if world.file_store is None:
             world.file_store = AgentFileStore(world.persistence.root)
+        from company_sim.ai.tools import tool_definitions_for
+
         bundle = world.file_store.pack_for_agent(world, actor, compact=True)
         executor = ToolExecutor(world, actor)
         system = system_prompt_for(actor)
+        tools = tool_definitions_for(actor)
+        known_tools = {str(d["function"]["name"]) for d in tools}
         user = (
             bundle.prompt_text
             + "\n"
@@ -147,12 +150,12 @@ class AIScheduler:
             resp = self.llm.chat(
                 system=system,
                 user=user,
-                tools=TOOL_DEFINITIONS,
+                tools=tools,
                 messages=messages,
             )
             msg = resp.message
             messages.append(msg)
-            tool_calls = parse_tool_calls(msg)
+            tool_calls = parse_tool_calls(msg, known_tools=known_tools)
             round_rec: dict[str, Any] = {
                 "assistant_content": (msg.get("content") or "").strip(),
                 "tool_calls": [],
