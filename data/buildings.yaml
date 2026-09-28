@@ -15,10 +15,11 @@
 buildings:
   - id: city_hall
     name: City Hall
-    description: Civic landmark. Does nothing — placed at each city's territory center at game start.
+    description: Civic landmark. Does nothing — placed by the engine at each city's territory center at game start (not buildable by players/agents).
     build_cost: 100
     build_cost_items:
       construction_materials: 10
+    buildable: false
     locks_production_method: false
     allowed_plot_types:
       - standard

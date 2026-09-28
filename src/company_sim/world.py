@@ -457,6 +457,10 @@ class World:
             bdef = self.buildings.get(building_id)
         except KeyError as exc:
             raise ActionError(f"Unknown building: {building_id}") from exc
+        if not bdef.buildable:
+            raise ActionError(
+                f"{bdef.name} is placed by the engine at game start and cannot be built"
+            )
         group = self.grid.combined_group(x, y) or [(x, y)]
         for cx, cy in group:
             p = self.grid.get(cx, cy).plot

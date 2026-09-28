@@ -50,8 +50,48 @@ def test_city_hall_in_catalog_and_inert():
     c = GameContent.load()
     hall = c.buildings.get("city_hall")
     assert hall.name == "City Hall"
+    assert hall.buildable is False
     assert c.methods_for_building("city_hall") == []
     assert c.storage_capacity_for_building("city_hall") == {}
+
+
+def test_city_halls_placed_by_engine_at_new_game_not_buildable():
+    """Halls exist immediately after World.new_game; build_building cannot create them."""
+    from company_sim.actions import ActionError
+
+    with tempfile.TemporaryDirectory() as td:
+        # Zero AI companies — no agent turns; halls must still exist right after boot
+        w = _world(Path(td), size=12, cities=2, ai=0)
+        assert w.started
+        halls = _city_halls(w)
+        assert len(halls) == 2
+        for city_id, hx, hy in halls:
+            b = w.grid.get(hx, hy).plot.building
+            assert b is not None
+            assert b.building_id == "city_hall"
+            assert b.owner_kind == "city"
+            assert b.owner_id == city_id
+
+        # Agents / players / cities cannot construct City Hall via build_building
+        city = next(iter(w.grid.cities.values()))
+        empty = next(
+            t
+            for t in w.grid.tiles
+            if t.plot
+            and t.plot.owned_by("city", city.id)
+            and t.plot.building is None
+        )
+        cash_before = city.cash
+        with pytest.raises(ActionError, match="engine at game start"):
+            w.build_building("city", city.id, empty.x, empty.y, "city_hall")
+        assert city.cash == cash_before
+
+        player = w.companies["player"]
+        empty.plot.claim("company", "player")
+        player.cash = 10_000
+        player.inventory.set("construction_materials", 50)
+        with pytest.raises(ActionError, match="engine at game start"):
+            w.build_building("company", "player", empty.x, empty.y, "city_hall")
 
 
 @pytest.mark.parametrize("size", [2, 8, 12, 24, 40, 64, 100])

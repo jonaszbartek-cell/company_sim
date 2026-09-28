@@ -358,14 +358,15 @@ function refreshContentSelects() {
   const focusBuildingId = existing?.building_id || buildId.value;
 
   if (buildings.length) {
+    const constructible = buildings.filter((b) => b.buildable !== false);
     const prev = buildId.value;
-    buildId.innerHTML = buildings
+    buildId.innerHTML = constructible
       .map((b) => `<option value="${b.id}">${b.name || b.id}</option>`)
       .join("");
     if (prev && [...buildId.options].some((o) => o.value === prev)) buildId.value = prev;
     updateBuildPreview();
     if (buildGallery) {
-      buildGallery.innerHTML = buildings
+      buildGallery.innerHTML = constructible
         .map((b) => {
           const src = buildingArt(b.id, "ui");
           const active = b.id === buildId.value ? "active" : "";
