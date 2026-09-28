@@ -136,6 +136,11 @@ class AgentFileStore:
         add(gov, "shared", limit=2500 if compact else None)
         proposals = self.root / "proposals.txt"
         add(proposals, "shared", limit=2500 if compact else None)
+        # Economy catalog index (derived from YAML; safe shared knowledge)
+        goods = self.root / "goods_index.txt"
+        if not goods.exists():
+            world.persistence.save_goods_index(world)
+        add(goods, "shared", limit=3500 if compact else None)
 
         # 4) Pending proposals involving this actor (derived filter, not another file)
         mine = world.proposals.pending_for(actor.kind, actor.id)

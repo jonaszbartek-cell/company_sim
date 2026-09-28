@@ -95,13 +95,20 @@ class GamePersistence:
         path.write_text(world.gov_contracts.to_text(), encoding="utf-8")
         return path
 
+    def save_goods_index(self, world: World) -> Path:
+        self.ensure_dirs()
+        path = self.root / "goods_index.txt"
+        path.write_text(world.content.render_goods_index_text(compact=True), encoding="utf-8")
+        return path
+
     def save_all(self, world: World) -> dict[str, Path]:
-        """Write world + market + agents + mailboxes + proposals + gov contracts."""
+        """Write world + market + agents + mailboxes + proposals + gov + goods index."""
         written: dict[str, Path] = {
             "world": self.save_world(world),
             "market": self.save_market(world.market),
             "proposals": self.save_proposals(world),
             "government_contracts": self.save_government_contracts(world),
+            "goods_index": self.save_goods_index(world),
         }
         for actor in world.iter_all_actors():
             written[f"agent:{actor.id}"] = self.save_agent(world, actor)

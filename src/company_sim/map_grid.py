@@ -221,7 +221,15 @@ def generate_map(
             center_x=x,
             center_y=y,
             population=pop,
-            inventory=Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0}),
+            inventory=Inventory(
+                {
+                    "iron_ore": 20,
+                    "coal": 20,
+                    "energy": 20,
+                    "steel": 0,
+                    "construction_materials": 50,
+                }
+            ),
         )
 
     # Equal-ish division: assign every cell to nearest city seed

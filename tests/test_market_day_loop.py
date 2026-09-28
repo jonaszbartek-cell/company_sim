@@ -76,7 +76,7 @@ def test_produce_steel():
         assert owned
         t = owned[0]
         w.build_building("company", "player", t.x, t.y, "foundry")
-        player.inventory = player.inventory.__class__({"iron": 2, "coal": 2, "energy": 2, "steel": 0})
+        player.inventory = player.inventory.__class__({"iron_ore": 2, "coal": 2, "energy": 2, "steel": 0})
         # build already marked acted; force another produce on same day by resetting flag
         player.acted_this_day = False
         r = w.produce("company", "player", t.x, t.y)

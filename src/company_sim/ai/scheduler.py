@@ -272,7 +272,7 @@ class AIScheduler:
         if not mine_open and not mine_awarded and city.cash >= 80:
             try:
                 world.post_government_contract(
-                    "city", city.id, {"iron": 2, "coal": 2, "energy": 1}
+                    "city", city.id, {"iron_ore": 2, "coal": 2, "energy": 1}
                 )
                 self.last_thought = f"{city.name}: posted government contract"
                 return
@@ -404,7 +404,7 @@ class AIScheduler:
                 self.last_thought = f"{company.name}: sell failed ({exc})"
 
         # Buy cheapest missing input from market
-        for item_id in ("iron", "coal", "energy"):
+        for item_id in ("iron_ore", "coal", "energy"):
             if company.inventory.get(item_id) < 3:
                 try:
                     world.buy_from_market("company", company.id, item_id, 2)

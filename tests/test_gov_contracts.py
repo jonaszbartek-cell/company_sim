@@ -26,17 +26,17 @@ def test_city_cannot_use_market():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td))
         try:
-            w.post_sell("city", "city_a", "iron", 1, 5)
+            w.post_sell("city", "city_a", "iron_ore", 1, 5)
             assert False
         except ActionError as exc:
             assert "companies" in exc.message.lower()
         try:
-            w.buy_from_market("city", "city_a", "iron", 1)
+            w.buy_from_market("city", "city_a", "iron_ore", 1)
             assert False
         except ActionError as exc:
             assert "companies" in exc.message.lower()
         try:
-            w.post_buy("city", "city_a", "iron", 1, 5)
+            w.post_buy("city", "city_a", "iron_ore", 1, 5)
             assert False
         except ActionError as exc:
             assert "companies" in exc.message.lower()
@@ -49,13 +49,13 @@ def test_government_contract_lowest_bid_wins_and_fulfill_pays():
         c1 = w.companies["ai_1"]
         c2 = w.companies["ai_2"]
         # Ensure winner can deliver
-        c2.inventory.set("iron", 5)
+        c2.inventory.set("iron_ore", 5)
         c2.inventory.set("coal", 5)
         city_cash = city.cash
         c2_cash = c2.cash
-        iron_city = city.inventory.get("iron")
+        iron_city = city.inventory.get("iron_ore")
 
-        r = w.post_government_contract("city", "city_a", {"iron": 3, "coal": 2})
+        r = w.post_government_contract("city", "city_a", {"iron_ore": 3, "coal": 2})
         cid = r.data["id"]
         w.bid_government_contract("company", "ai_1", cid, 100)
         w.bid_government_contract("company", "ai_2", cid, 60)  # lower wins
@@ -71,7 +71,7 @@ def test_government_contract_lowest_bid_wins_and_fulfill_pays():
 
         w.fulfill_government_contract("company", "ai_2", cid)
         assert contract.status == "fulfilled"
-        assert city.inventory.get("iron") == iron_city + 3
+        assert city.inventory.get("iron_ore") == iron_city + 3
         assert city.inventory.get("coal") >= 2
         assert c2.cash == c2_cash + 60
         assert cid not in w.gov_contracts.escrow_cash
@@ -80,9 +80,9 @@ def test_government_contract_lowest_bid_wins_and_fulfill_pays():
 def test_fulfill_requires_all_resources():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td))
-        w.companies["ai_1"].inventory.set("iron", 0)
+        w.companies["ai_1"].inventory.set("iron_ore", 0)
         w.companies["ai_1"].inventory.set("coal", 0)
-        r = w.post_government_contract("city", "city_a", {"iron": 2, "coal": 2})
+        r = w.post_government_contract("city", "city_a", {"iron_ore": 2, "coal": 2})
         cid = r.data["id"]
         w.bid_government_contract("company", "ai_1", cid, 40)
         w.award_government_contract("city", "city_a", cid)
@@ -96,8 +96,8 @@ def test_fulfill_requires_all_resources():
 def test_non_winner_cannot_fulfill():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td))
-        w.companies["ai_1"].inventory.set("iron", 5)
-        r = w.post_government_contract("city", "city_a", {"iron": 1})
+        w.companies["ai_1"].inventory.set("iron_ore", 5)
+        r = w.post_government_contract("city", "city_a", {"iron_ore": 1})
         cid = r.data["id"]
         w.bid_government_contract("company", "ai_1", cid, 20)
         w.bid_government_contract("company", "ai_2", cid, 50)
@@ -139,7 +139,7 @@ def test_gov_contracts_file_saved():
     with tempfile.TemporaryDirectory() as td:
         root = Path(td)
         w = _world(root)
-        w.post_government_contract("city", "city_a", {"iron": 1})
+        w.post_government_contract("city", "city_a", {"iron_ore": 1})
         text = (root / "government_contracts.txt").read_text(encoding="utf-8")
         assert "=== GOVERNMENT CONTRACTS ===" in text
-        assert "needs: 1x iron" in text
+        assert "needs: 1x iron_ore" in text

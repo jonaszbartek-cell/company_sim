@@ -56,7 +56,16 @@ class WorldConfig:
 
 
 def _starter_inventory() -> Inventory:
-    return Inventory({"iron": 20, "coal": 20, "energy": 20, "steel": 0})
+    # Starter economy TBD later — temporary placeholder so buildings/recipes can run.
+    return Inventory(
+        {
+            "iron_ore": 20,
+            "coal": 20,
+            "energy": 20,
+            "steel": 0,
+            "construction_materials": 50,
+        }
+    )
 
 
 @dataclass
@@ -136,7 +145,15 @@ class World:
                 tile.plot.claim("city", tile.city_id)
 
         for city in grid.cities.values():
-            city.inventory = Inventory({"iron": 15, "coal": 15, "energy": 15, "steel": 0})
+            city.inventory = Inventory(
+                {
+                    "iron_ore": 15,
+                    "coal": 15,
+                    "energy": 15,
+                    "steel": 0,
+                    "construction_materials": 40,
+                }
+            )
 
         # Player + AI companies start with NO plots
         player = Company(
@@ -156,7 +173,15 @@ class World:
                 name=f"Rival {i+1}",
                 is_player=False,
                 cash=1500,
-                inventory=Inventory({"iron": 10, "coal": 10, "energy": 10, "steel": 0}),
+                inventory=Inventory(
+                    {
+                        "iron_ore": 10,
+                        "coal": 10,
+                        "energy": 10,
+                        "steel": 0,
+                        "construction_materials": 30,
+                    }
+                ),
             )
 
         world._seed_market()
@@ -179,7 +204,7 @@ class World:
         for company in self.companies.values():
             if company.is_player:
                 continue
-            for item_id, qty, price in (("iron", 2, 9), ("coal", 2, 7)):
+            for item_id, qty, price in (("iron_ore", 2, 9), ("coal", 2, 7)):
                 if company.inventory.get(item_id) < qty:
                     continue
                 company.inventory.add(item_id, -qty)
@@ -316,10 +341,17 @@ class World:
             raise ActionError(f"{bdef.name} cannot be built on {tile.plot.plot_type.value} plots")
         if actor.cash < bdef.build_cost:
             raise ActionError("Not enough cash")
+        if bdef.build_cost_items and not actor.inventory.has(bdef.build_cost_items):
+            raise ActionError(
+                f"Missing build materials: need {bdef.build_cost_items}, "
+                f"have {actor.inventory.as_dict()}"
+            )
 
         methods = self.content.methods_for_building(building_id)
         method_id = methods[0].id if methods else None
         actor.cash -= bdef.build_cost
+        if bdef.build_cost_items:
+            actor.inventory.consume(bdef.build_cost_items)
         tile.plot.building = Building(
             building_id=building_id,
             owner_kind=owner_kind,
@@ -331,7 +363,12 @@ class World:
         return ActionResult(
             True,
             f"Built {bdef.name} at ({x},{y})",
-            {"cost": bdef.build_cost, "building_id": building_id, "production_method_id": method_id},
+            {
+                "cost": bdef.build_cost,
+                "cost_items": dict(bdef.build_cost_items),
+                "building_id": building_id,
+                "production_method_id": method_id,
+            },
         )
 
     def set_production_method(

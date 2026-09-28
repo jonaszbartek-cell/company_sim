@@ -820,7 +820,7 @@ function autofillToolArgs() {
     if (key === "side") el.value = roadSide.value;
     if (key === "building_id") el.value = buildId.value;
     if (key === "method_id") el.value = methodId.value;
-    if (key === "item_id" && !el.value) el.value = document.getElementById("mkt-item").value || "iron";
+    if (key === "item_id" && !el.value) el.value = document.getElementById("mkt-item").value || "iron_ore";
     if (key === "to" && selected) {
       const t = tileAt(selected.x, selected.y);
       if (t?.plot?.owner_id && !isPlayerOwned(t.plot)) {

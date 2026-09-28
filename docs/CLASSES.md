@@ -33,7 +33,7 @@ Market
 
 ## Seed content
 
-- Items: **iron, coal, energy, steel**
+- Items: **iron_ore, coal, energy, steel**
 - Building: **foundry**
 - Method: **make_steel** (1+1+1 → 1 steel)
 
