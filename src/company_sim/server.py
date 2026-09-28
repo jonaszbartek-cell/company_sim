@@ -23,6 +23,7 @@ class SetupBody(BaseModel):
     ai_companies: int = Field(default=2, ge=0, le=12)
     cities: int = Field(default=1, ge=1, le=8)
     map_size: int = Field(default=12, ge=2, le=40)
+    llm_debug: bool = False
 
 
 class BuildBody(BaseModel):
@@ -139,6 +140,7 @@ def create_app() -> FastAPI:
                             "ai_companies": 2,
                             "cities": 1,
                             "map_size": 12,
+                            "llm_debug": False,
                         },
                     },
                 )
@@ -170,13 +172,19 @@ def create_app() -> FastAPI:
     def get_setup() -> dict[str, Any]:
         return {
             "started": world is not None and world.started,
-            "defaults": {"ai_companies": 2, "cities": 1, "map_size": 12},
+            "defaults": {
+                "ai_companies": 2,
+                "cities": 1,
+                "map_size": 12,
+                "llm_debug": False,
+            },
             "config": None
             if world is None
             else {
                 "ai_companies": world.config.ai_company_count,
                 "cities": world.config.starting_cities,
                 "map_size": world.config.map_size,
+                "llm_debug": world.config.llm_debug,
             },
         }
 
@@ -191,6 +199,7 @@ def create_app() -> FastAPI:
                     map_size=body.map_size,
                     starting_cities=body.cities,
                     ai_company_count=body.ai_companies,
+                    llm_debug=bool(body.llm_debug),
                 )
             )
             app.state.world = world
@@ -199,6 +208,7 @@ def create_app() -> FastAPI:
                 "message": (
                     f"Started {body.map_size}x{body.map_size} map with "
                     f"{body.cities} cities and {body.ai_companies} AI companies"
+                    + (" (LLM debug on)" if body.llm_debug else "")
                 ),
                 "state": world.to_public_dict(),
             }
@@ -215,7 +225,12 @@ def create_app() -> FastAPI:
                 "state": None,
                 "ai": None,
                 "ai_mode": None,
-                "defaults": {"ai_companies": 2, "cities": 1, "map_size": 12},
+                "defaults": {
+                    "ai_companies": 2,
+                    "cities": 1,
+                    "map_size": 12,
+                    "llm_debug": False,
+                },
             }
         return {
             "started": True,
@@ -228,6 +243,42 @@ def create_app() -> FastAPI:
                 "base_url": scheduler.llm.config.base_url,
             },
         }
+
+    @app.get("/api/llm_debug")
+    def get_llm_debug() -> dict[str, Any]:
+        w = world
+        if w is None or not w.started:
+            return {"ok": False, "message": "Game not started", "enabled": False, "traces": []}
+        dbg = w.llm_debug_log
+        enabled = bool(w.config.llm_debug)
+        instructions: list[str] = []
+        if w.file_store is not None and w.file_store.instructions_dir.exists():
+            instructions = sorted(p.name for p in w.file_store.instructions_dir.glob("*.txt"))
+        traces = [] if dbg is None else dbg.recent_traces(40)
+        return {
+            "ok": True,
+            "enabled": enabled,
+            "instructions": instructions,
+            "traces": traces,
+            "last_summary": None if dbg is None else dbg.last_summary,
+            "last_trace": None
+            if dbg is None or dbg.last_trace_path is None
+            else str(dbg.last_trace_path.relative_to(dbg.debug_dir)),
+        }
+
+    @app.get("/api/llm_debug/trace")
+    def get_llm_debug_trace(path: str) -> dict[str, Any]:
+        try:
+            w = _require_world()
+        except ActionError as exc:
+            return {"ok": False, "message": exc.message, "text": None}
+        dbg = w.llm_debug_log
+        if dbg is None or not dbg.enabled:
+            return {"ok": False, "message": "LLM debug is not enabled", "text": None}
+        text = dbg.read_trace(path)
+        if text is None:
+            return {"ok": False, "message": f"Trace not found: {path}", "text": None}
+        return {"ok": True, "path": path, "text": text}
 
     @app.post("/api/pause")
     def pause(body: PauseBody) -> dict[str, Any]:

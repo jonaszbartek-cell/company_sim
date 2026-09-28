@@ -30,6 +30,12 @@ const mailTo = document.getElementById("mail-to");
 const mailBody = document.getElementById("mail-body");
 const mailLog = document.getElementById("mail-log");
 const btnMailSend = document.getElementById("btn-mail-send");
+const llmDebugPanel = document.getElementById("llm-debug-panel");
+const llmDebugSummary = document.getElementById("llm-debug-summary");
+const llmDebugSelect = document.getElementById("llm-debug-select");
+const llmDebugTrace = document.getElementById("llm-debug-trace");
+const btnLlmDebugRefresh = document.getElementById("btn-llm-debug-refresh");
+const btnLlmDebugView = document.getElementById("btn-llm-debug-view");
 
 let state = null;
 let selected = null;
@@ -52,6 +58,7 @@ function showSetup(defaults) {
     if (defaults.ai_companies != null) document.getElementById("setup-companies").value = defaults.ai_companies;
     if (defaults.cities != null) document.getElementById("setup-cities").value = defaults.cities;
     if (defaults.map_size != null) document.getElementById("setup-map").value = defaults.map_size;
+    if (defaults.llm_debug != null) document.getElementById("setup-llm-debug").checked = !!defaults.llm_debug;
   }
 }
 
@@ -228,6 +235,7 @@ function refreshPanels() {
   }
   refreshMailContacts();
   refreshMailLog();
+  refreshLlmDebugPanel();
   btnPause.textContent = state.paused ? "Resume" : "Pause";
 
   if (!selected) {
@@ -285,6 +293,7 @@ setupForm.addEventListener("submit", async (ev) => {
     ai_companies: Number(document.getElementById("setup-companies").value),
     cities: Number(document.getElementById("setup-cities").value),
     map_size: Number(document.getElementById("setup-map").value),
+    llm_debug: document.getElementById("setup-llm-debug").checked,
   };
   const res = await fetch("/api/setup", {
     method: "POST",
@@ -519,6 +528,72 @@ btnMailSend.addEventListener("click", async () => {
   const data = await res.json();
   if (!data.ok) alert(data.message);
   else mailBody.value = "";
+});
+
+function refreshLlmDebugPanel() {
+  if (!state || !state.llm_debug || !state.llm_debug.enabled) {
+    llmDebugPanel.hidden = true;
+    return;
+  }
+  llmDebugPanel.hidden = false;
+  const parts = [];
+  if (state.llm_debug.last_summary) parts.push(state.llm_debug.last_summary);
+  const instr = state.llm_debug.instructions || [];
+  if (instr.length) parts.push(`instructions: ${instr.join(", ")}`);
+  llmDebugSummary.textContent = parts.length ? parts.join("\n") : "debug on — waiting for AI turns";
+}
+
+async function loadLlmDebugTraces() {
+  const res = await fetch("/api/llm_debug");
+  const data = await res.json();
+  if (!data.ok) {
+    llmDebugTrace.textContent = data.message || "failed to load";
+    return;
+  }
+  const prev = llmDebugSelect.value;
+  const traces = data.traces || [];
+  llmDebugSelect.innerHTML = traces
+    .map((t) => {
+      const line = t.line || "";
+      const parts = line.trim().split(/\s+/);
+      const rel = parts[parts.length - 1] || line;
+      return `<option value="${rel}">${line}</option>`;
+    })
+    .join("");
+  if (prev && [...llmDebugSelect.options].some((o) => o.value === prev)) {
+    llmDebugSelect.value = prev;
+  }
+  if (data.last_summary) {
+    llmDebugSummary.textContent = data.last_summary;
+  }
+  const instr = data.instructions || [];
+  if (instr.length) {
+    llmDebugSummary.textContent =
+      (llmDebugSummary.textContent || "") +
+      (llmDebugSummary.textContent ? "\n" : "") +
+      `instructions: ${instr.join(", ")}`;
+  }
+}
+
+btnLlmDebugRefresh.addEventListener("click", () => {
+  loadLlmDebugTraces().catch((e) => {
+    llmDebugTrace.textContent = String(e);
+  });
+});
+
+btnLlmDebugView.addEventListener("click", async () => {
+  const path = llmDebugSelect.value;
+  if (!path) {
+    llmDebugTrace.textContent = "(no trace selected)";
+    return;
+  }
+  const res = await fetch(`/api/llm_debug/trace?path=${encodeURIComponent(path)}`);
+  const data = await res.json();
+  if (!data.ok) {
+    llmDebugTrace.textContent = data.message || "failed";
+    return;
+  }
+  llmDebugTrace.textContent = data.text || "(empty)";
 });
 
 function connect() {

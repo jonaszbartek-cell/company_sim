@@ -20,6 +20,10 @@
       <label>Map size (plots per side)
         <input id="setup-map" type="number" min="2" max="40" value="12" />
       </label>
+      <label class="setup-check">
+        <input id="setup-llm-debug" type="checkbox" />
+        LLM debug (write per-turn traces under saves/llm_debug/)
+      </label>
       <button id="btn-start" type="submit">Start game</button>
       <p id="setup-error" class="setup-error" hidden></p>
     </form>
@@ -81,6 +85,16 @@
         <h2>AI</h2>
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
+        <div id="llm-debug-panel" hidden>
+          <h2>LLM debug</h2>
+          <pre id="llm-debug-summary" class="hint">—</pre>
+          <div class="row">
+            <button id="btn-llm-debug-refresh" type="button">Refresh traces</button>
+          </div>
+          <select id="llm-debug-select"></select>
+          <button id="btn-llm-debug-view" type="button">View trace</button>
+          <pre id="llm-debug-trace">—</pre>
+        </div>
         <p class="hint">
           Roads are edges on owned plots (N/E/S/W). Cost: 1 steel (consumed). Combine adjacent owned plots only with no road between.
           Plot buy/sell are direct proposals — accept or reject.

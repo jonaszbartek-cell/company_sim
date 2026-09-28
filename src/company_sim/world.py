@@ -7,6 +7,7 @@ from pathlib import Path
 
 from company_sim.actions import ActionError, ActionResult
 from company_sim.actors import Actor, ActorKind, Company
+from company_sim.agent_files import AgentFileStore, LLMDebugLog
 from company_sim.buildings import Building
 from company_sim.content import GameContent
 from company_sim.contracts import ContractBid, GovernmentContract, GovernmentContractBook
@@ -33,6 +34,7 @@ class WorldConfig:
     road_build_steel: int = 1  # placeholder: steel consumed per edge road
     min_seconds_between_turns: float = 1.5
     save_dir: str | None = None
+    llm_debug: bool = False  # write per-turn LLM traces under saves/llm_debug/
     # Deprecated aliases (tests / older callers); folded into map_size in __post_init__
     map_width: int | None = None
     map_height: int | None = None
@@ -74,6 +76,8 @@ class World:
     tick_index: int = 0
     turn_index: int = 0
     persistence: GamePersistence = field(default_factory=GamePersistence)
+    file_store: AgentFileStore | None = None
+    llm_debug_log: LLMDebugLog | None = None
     started: bool = True
 
     @property
@@ -110,6 +114,8 @@ class World:
 
         grid = generate_map(config.map_size, city_seeds=seeds)
         save_root = Path(config.save_dir) if config.save_dir else default_save_dir()
+        file_store = AgentFileStore(save_root)
+        llm_debug_log = LLMDebugLog(save_root, enabled=bool(config.llm_debug))
         world = cls(
             config=config,
             grid=grid,
@@ -119,6 +125,8 @@ class World:
             gov_contracts=GovernmentContractBook(),
             mailboxes=MailboxStore(root=save_root),
             persistence=GamePersistence(save_root),
+            file_store=file_store,
+            llm_debug_log=llm_debug_log,
             started=True,
         )
 
@@ -155,6 +163,11 @@ class World:
         assert world.mailboxes is not None
         world.mailboxes.ensure_all_pairs(world.iter_all_actors())
         world.persistence.save_all(world)
+        # One COMPANY/CITY_INSTRUCTIONS_<id>.txt stub per agent (placeholder body)
+        assert world.file_store is not None
+        world.file_store.ensure_all_instructions(world)
+        if world.llm_debug_log is not None:
+            world.llm_debug_log.ensure_dir()
         return world
 
     def mail(self) -> MailboxStore:
@@ -1345,6 +1358,21 @@ class World:
                 "ai_company_count": self.config.ai_company_count,
                 "road_build_cost": self.config.road_build_cost,
                 "road_build_steel": self.config.road_build_steel,
+                "llm_debug": self.config.llm_debug,
+            },
+            "llm_debug": {
+                "enabled": bool(self.config.llm_debug),
+                "last_summary": None
+                if self.llm_debug_log is None
+                else self.llm_debug_log.last_summary,
+                "last_trace": None
+                if self.llm_debug_log is None or self.llm_debug_log.last_trace_path is None
+                else str(self.llm_debug_log.last_trace_path.name),
+                "instructions": (
+                    []
+                    if self.file_store is None or not self.file_store.instructions_dir.exists()
+                    else sorted(p.name for p in self.file_store.instructions_dir.glob("*.txt"))
+                ),
             },
             "companies": [c.to_public_dict() for c in self.companies.values()],
             "market": self.market.to_public_dict(),
