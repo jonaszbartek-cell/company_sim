@@ -27,8 +27,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from company_sim.map_grid import TileKind
-
 if TYPE_CHECKING:
     from company_sim.actors import Actor
     from company_sim.market import Market
@@ -135,11 +133,14 @@ class GamePersistence:
             hint = (
                 "You are a CITY. You cannot use the market. "
                 "Procure goods via post_government_contract / award_government_contract. "
-                "Then call done.\n"
+                "Sell or buy plots via propose_plot_sell / propose_plot_buy (accept/reject). "
+                "Build edge roads (N/E/S/W) on plots you own. Combine adjacent plots only if "
+                "no road sits between them. Then call done.\n"
             )
         else:
             hint = (
-                "You are a COMPANY. Use the market, direct proposals, and "
+                "You are a COMPANY. Use the market, goods propose_sell/propose_buy, "
+                "plot propose_plot_buy/propose_plot_sell (accept/reject), and "
                 "bid_government_contract / fulfill_government_contract. Then call done.\n"
             )
         return (
@@ -170,30 +171,32 @@ class GamePersistence:
         mail_n = len(world.mailboxes.boxes) if world.mailboxes else 0
         owned_lines: list[str] = []
         for t in world.grid.tiles:
-            if t.kind != TileKind.PLOT or not t.plot or not t.plot.owner_id:
+            if not t.plot or not t.plot.owner_id:
                 continue
             b = t.plot.building
             if b:
                 bstr = f"{b.id}:{b.building_id}[{b.status}] method={b.production_method_id}"
             else:
                 bstr = "none"
+            roads = ",".join(s for s, on in t.plot.roads.items() if on) or "-"
+            comb = ",".join(f"{s}:{pid}" for s, pid in t.plot.combined.items() if pid) or "-"
             owned_lines.append(
                 f"  {t.plot.id} ({t.x},{t.y}) type={t.plot.plot_type.value} "
-                f"size={world.grid.parcel_size(t.plot.parcel_id)} "
+                f"group={world.grid.group_size(t.x, t.y)} "
                 f"owner={t.plot.owner_kind}:{t.plot.owner_id} "
-                f"value={t.plot.value} price={t.plot.price} building={bstr}"
+                f"value={t.plot.value} roads=[{roads}] combined=[{comb}] building={bstr}"
             )
 
         unowned_lines: list[str] = []
         unowned_count = 0
         for t in world.grid.tiles:
-            if t.kind != TileKind.PLOT or not t.plot or t.plot.owner_id is not None:
+            if not t.plot or t.plot.owner_id is not None:
                 continue
             unowned_count += 1
             if len(unowned_lines) < 24:
                 unowned_lines.append(
                     f"  ({t.x},{t.y}) type={t.plot.plot_type.value} "
-                    f"price={t.plot.price} value={t.plot.value} city={t.city_id}"
+                    f"value={t.plot.value} city={t.city_id}"
                 )
 
         lines = [
@@ -201,7 +204,7 @@ class GamePersistence:
             "file: world.txt",
             f"day: {world.day}",
             f"paused: {world.paused}",
-            f"map: {world.grid.width}x{world.grid.height}",
+            f"map: {world.grid.width}x{world.grid.height} (plots per side={world.config.map_size})",
             f"companies: {', '.join(company_ids)}",
             f"cities: {', '.join(city_ids)}",
             f"agents: {n_agents}",
@@ -251,10 +254,12 @@ class GamePersistence:
                 )
             else:
                 binfo = "building=none"
+            roads = ",".join(s for s, on in t.plot.roads.items() if on) or "-"
+            comb = ",".join(f"{s}:{pid}" for s, pid in t.plot.combined.items() if pid) or "-"
             plot_lines.append(
                 f"  {t.plot.id} @({t.x},{t.y}) type={t.plot.plot_type.value} "
-                f"size={world.grid.parcel_size(t.plot.parcel_id)} "
-                f"value={t.plot.value} {binfo}"
+                f"group={world.grid.group_size(t.x, t.y)} value={t.plot.value} "
+                f"roads=[{roads}] combined=[{comb}] {binfo}"
             )
 
         my_listings = [

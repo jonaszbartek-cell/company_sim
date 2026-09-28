@@ -1,13 +1,13 @@
-"""Direct trade proposals between two agents (not the public market).
+"""Direct proposals between agents: goods and plots.
 
-Sell proposal: proposer offers to sell qty @ price to a counterpart.
-  → goods are reserved from proposer until accept / reject / cancel.
+Goods (company↔company):
+  sell — reserve goods; buy — reserve cash.
 
-Buy proposal: proposer offers to buy qty @ price from a counterpart.
-  → cash is reserved from proposer until accept / reject / cancel.
+Plots (company or city):
+  plot_sell — seller locks plot, offers to buyer at a total price
+  plot_buy  — buyer escrows cash, offers to buy a specific plot from owner
 
-Accept moves the other side (cash or goods) and clears the reservation.
-Reject/cancel returns the reservation to the proposer.
+Accept / reject / cancel clear reservations and either transfer or unlock.
 """
 
 from __future__ import annotations
@@ -15,27 +15,41 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-ProposalSide = Literal["sell", "buy"]
+ProposalType = Literal["goods_sell", "goods_buy", "plot_sell", "plot_buy"]
 ProposalStatus = Literal["pending", "accepted", "rejected", "cancelled"]
 
 
 @dataclass
 class DirectProposal:
     id: int
-    side: ProposalSide
-    item_id: str
-    quantity: int
-    price: int  # cash per unit
+    proposal_type: ProposalType
     from_kind: str
     from_id: str
     to_kind: str
     to_id: str
+    price: int  # per-unit for goods; total for plots
     status: ProposalStatus = "pending"
     day_created: int = 1
+    # goods
+    item_id: str | None = None
+    quantity: int = 0
+    # plots
+    plot_x: int | None = None
+    plot_y: int | None = None
+    plot_id: str | None = None
+
+    @property
+    def side(self) -> str:
+        """Legacy alias used by older UI: sell/buy."""
+        if self.proposal_type in ("goods_sell", "plot_sell"):
+            return "sell"
+        return "buy"
 
     @property
     def total(self) -> int:
-        return self.price * self.quantity
+        if self.proposal_type in ("goods_sell", "goods_buy"):
+            return self.price * self.quantity
+        return self.price
 
     @property
     def from_key(self) -> str:
@@ -53,11 +67,15 @@ class DirectProposal:
     def to_public_dict(self) -> dict:
         return {
             "id": self.id,
+            "proposal_type": self.proposal_type,
             "side": self.side,
             "item_id": self.item_id,
             "quantity": self.quantity,
             "price": self.price,
             "total": self.total,
+            "plot_x": self.plot_x,
+            "plot_y": self.plot_y,
+            "plot_id": self.plot_id,
             "from": self.from_key,
             "to": self.to_key,
             "status": self.status,
@@ -65,20 +83,23 @@ class DirectProposal:
         }
 
     def to_text_line(self) -> str:
+        if self.proposal_type.startswith("plot_"):
+            return (
+                f"#{self.id} [{self.status}] {self.proposal_type} "
+                f"plot=({self.plot_x},{self.plot_y}) id={self.plot_id} "
+                f"@ {self.price} {self.from_key} -> {self.to_key} (day {self.day_created})"
+            )
         return (
-            f"#{self.id} [{self.status}] {self.side} {self.quantity}x {self.item_id} "
-            f"@ {self.price}/u {self.from_key} -> {self.to_key} (day {self.day_created})"
+            f"#{self.id} [{self.status}] {self.proposal_type} "
+            f"{self.quantity}x {self.item_id} @ {self.price}/u "
+            f"{self.from_key} -> {self.to_key} (day {self.day_created})"
         )
 
 
 @dataclass
 class ProposalBook:
-    """Indexed direct proposals + reserved goods/cash keyed by proposal id."""
-
     proposals: dict[int, DirectProposal] = field(default_factory=dict)
-    # Reserved goods sitting in proposals: proposal_id → (item_id, qty)
     reserved_goods: dict[int, tuple[str, int]] = field(default_factory=dict)
-    # Reserved cash: proposal_id → amount
     reserved_cash: dict[int, int] = field(default_factory=dict)
     _next_id_value: int = 1
 
@@ -100,11 +121,6 @@ class ProposalBook:
             for p in self.proposals.values()
             if p.status == "pending" and p.involves(kind, actor_id)
         ]
-        rows.sort(key=lambda p: p.id)
-        return rows
-
-    def all_involving(self, kind: str, actor_id: str) -> list[DirectProposal]:
-        rows = [p for p in self.proposals.values() if p.involves(kind, actor_id)]
         rows.sort(key=lambda p: p.id)
         return rows
 

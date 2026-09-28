@@ -1,24 +1,33 @@
 # company_sim — Design Document
 
-**Status:** Draft v0.7  
-**Date:** 2026-09-27  
+**Status:** Draft v0.8  
+**Date:** 2026-09-28  
 **Repo:** [jonaszbartek-cell/company_sim](https://github.com/jonaszbartek-cell/company_sim)
 
 ---
 
 ## 1. Game concept
 
-Company economic simulator on a **2D grid** of **roads and plots**. Goal: make the strongest company.
+Company economic simulator on a **2D grid of square plots only**. Roads live on **plot edges**. Goal: make the strongest company.
 
-### Scoped cast (now)
+### Startup (setup screen)
+
+Choose **AI companies**, **agent cities**, and **map size** (plots per side). On start:
+
+- Map is divided equally (nearest-center) among cities
+- **Cities own every plot** in their territory
+- **Companies start with no plots**
+- Save files / mailboxes / config are created
+
+### Scoped cast
 
 | Role | Count |
 |------|-------|
 | Player company | 1 |
-| AI companies | 2 |
-| City agent | 1 |
+| AI companies | N (setup) |
+| City agents | M (setup) |
 
-A **city is not a special tile**. It is an LLM agent administering a territory of normal roads/plots/buildings.
+A **city is not a special tile**. It is an LLM agent administering territory of plots.
 
 ---
 
@@ -31,9 +40,12 @@ A **city is not a special tile**. It is an LLM agent administering a territory o
 | Engine | LLM acts as one agent; when finished, next agent (sequential) |
 | Persist | Text files: world, market, per-agent, **pairwise mailboxes** |
 | Market | Indexed buy/sell listings; sell goods escrowed on market; buy takes lowest price |
-| Map cells | Only `road` and `plot` (+ rare empty) |
-| Plot types | `standard`, `specialized` (roads are tiles, not plots) |
+| Map cells | Square **plots only** (no road tiles) |
+| Roads | Built on a **side** (N/E/S/W) of an owned plot only — neighbor unchanged; costs **1 steel** (placeholder, goods consumed) |
+| Plot combine | Flag only — plots stay; adjacent + no road between; no road on combined side |
+| Plot types | `standard`, `specialized` |
 | Goods | iron, coal, energy, steel + Foundry / make_steel |
+| Plot trade | Direct `plot_buy` / `plot_sell` proposals (accept/reject) |
 
 ---
 
@@ -59,14 +71,18 @@ A **city is not a special tile**. It is an LLM agent administering a territory o
 |-------|-------|
 | id | yes |
 | owner | `owner_kind` + `owner_id` |
-| value | land valuation (seeded from price; future use) |
+| value | land valuation |
 | type | `standard` \| `specialized` |
-| location | **yes, but on the Tile** as `(x,y)` — keep it there, echo in agent text files |
-| size | always **1** per cell; **parcel size** grows when merged |
+| location | on the Tile as `(x,y)` |
+| size | always **1** per cell; **group size** via combine flags |
+| roads | per-side bools N/E/S/W |
+| combined | per-side neighbor plot id (or none) — plots never disappear |
 | building | optional Building instance |
-| price | buy price while unowned |
+| reserved_proposal_id | lock while a plot proposal is pending |
 
-**Roads:** not plots. No size, no building. `TileKind.ROAD` only.
+**Roads:** edges on plots, not separate tiles. Own the plot → choose side (N/E/S/W) → that plot's edge becomes a road (adjacent plot is unchanged). Cannot place a road on a combined side.
+
+**Combine:** adjacent owned plots with no road between get pairwise flags. Building a road on that shared edge is forbidden.
 
 ### Building
 
@@ -91,11 +107,10 @@ Sell → goods leave seller → sit on market until bought → cash to seller on
 Buy now → fill from **lowest-price** sell listings.  
 Buy order → cash escrowed; auto-match sells at `sell.price <= buy.price`.
 
-### Still later (not missing for v0.7)
+### Still later (not missing for v0.8)
 
-- Direct negotiate / contracts between agents  
 - Population demand basket  
-- Specialized plot rules / parcel value formulas  
+- Specialized plot rules / group value formulas  
 
 ---
 

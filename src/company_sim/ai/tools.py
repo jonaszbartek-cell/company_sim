@@ -8,8 +8,6 @@ from __future__ import annotations
 from typing import Any, TYPE_CHECKING
 
 from company_sim.actions import ActionError
-from company_sim.map_grid import TileKind
-
 if TYPE_CHECKING:
     from company_sim.actors import Actor
     from company_sim.world import World
@@ -44,8 +42,8 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "list_unowned_plots",
-            "description": "List nearby unowned plots (price, type, coords).",
+            "name": "list_plots_for_sale",
+            "description": "List plots owned by others you might buy via propose_plot_buy (value, owner, coords).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -58,12 +56,35 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
-            "name": "buy_plot",
-            "description": "Buy an unowned plot at grid coordinates.",
+            "name": "propose_plot_buy",
+            "description": "Direct proposal to buy a plot from its owner (escrows cash until accept/reject).",
             "parameters": {
                 "type": "object",
-                "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
-                "required": ["x", "y"],
+                "properties": {
+                    "to": {"type": "string", "description": "Owner key e.g. city:city_a"},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["to", "x", "y", "price"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "propose_plot_sell",
+            "description": "Direct proposal to sell a plot you own (locks plot until accept/reject).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string"},
+                    "x": {"type": "integer"},
+                    "y": {"type": "integer"},
+                    "price": {"type": "integer"},
+                },
+                "required": ["to", "x", "y", "price"],
                 "additionalProperties": False,
             },
         },
@@ -347,11 +368,24 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "build_road",
-            "description": "Build a road on an empty or unowned plot cell (costs cash).",
+            "description": (
+                "Build a road on ONE side of a plot you own. "
+                "Choose side: N, E, S, or W — only that plot's edge becomes a road "
+                "(the adjacent plot is unchanged). Costs 1 steel (placeholder; goods are consumed). "
+                "Forbidden on a combined side."
+            ),
             "parameters": {
                 "type": "object",
-                "properties": {"x": {"type": "integer"}, "y": {"type": "integer"}},
-                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "integer", "description": "Plot x coordinate"},
+                    "y": {"type": "integer", "description": "Plot y coordinate"},
+                    "side": {
+                        "type": "string",
+                        "enum": ["N", "E", "S", "W"],
+                        "description": "Which edge of THIS plot gets the road: N, E, S, or W",
+                    },
+                },
+                "required": ["x", "y", "side"],
                 "additionalProperties": False,
             },
         },
@@ -360,7 +394,7 @@ TOOL_DEFINITIONS: list[dict[str, Any]] = [
         "type": "function",
         "function": {
             "name": "merge_plots",
-            "description": "Merge two adjacent plots you own into one parcel.",
+            "description": "Combine two adjacent owned plots (flags only). Forbidden if a road is between them.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -470,14 +504,14 @@ def system_prompt_for(actor: Actor) -> str:
             "You administer a city of normal roads and plots. "
             "You CANNOT use the market. To buy goods, post_government_contract with required "
             "resources, then award_government_contract (lowest company bid wins). "
-            "Claim plots, build workshops, keep territory healthy. "
+            "Sell plots via propose_plot_sell, buy via propose_plot_buy (accept/reject), build edge roads on owned plots, combine adjacent plots without roads between. "
             "Stay within cash. Use only the provided tools. Be concise."
         )
     return (
         "You run a company. Become the strongest firm: "
-        "buy plots, build foundries, trade on the market, and bid on city government contracts. "
+        "buy plots via propose_plot_buy (cities own land at start), build foundries, trade on the market, and bid on city government contracts. "
         "When awarded a contract, gather the goods and fulfill_government_contract to get paid. "
-        "You may send_message and use direct propose_sell/propose_buy with other companies. "
+        "You may send_message, propose_sell/propose_buy (goods), and propose_plot_buy/propose_plot_sell. Always accept or reject pending proposals addressed to you. "
         "Stay within cash. Use only the provided tools. Be concise."
     )
 
@@ -546,39 +580,69 @@ class ToolExecutor:
                 data["buy_listings"] = [L for L in data["buy_listings"] if L["item_id"] == item_id]
             return {"ok": True, "message": "market", "data": data}
 
-        if name == "list_unowned_plots" or name == "get_market_overview":
+        if name == "list_unowned_plots" or name == "list_plots_for_sale" or name == "get_market_overview":
             limit = int(args.get("limit", 8))
-            unowned = []
+            candidates = []
             for t in self.world.grid.tiles:
-                if t.kind != TileKind.PLOT or not t.plot or t.plot.owner_id is not None:
+                if not t.plot or not t.plot.owner_id:
                     continue
-                if not self.world.grid.is_road_access(t.x, t.y):
+                if t.plot.owned_by(kind, aid):
                     continue
-                if kind == "city" and t.city_id != aid:
+                if t.plot.reserved_proposal_id is not None:
                     continue
-                unowned.append(t)
-            unowned.sort(key=lambda t: t.plot.price if t.plot else 9999)
+                candidates.append(t)
+            candidates.sort(key=lambda t: t.plot.value if t.plot else 9999)
             return {
                 "ok": True,
                 "message": "plots",
                 "data": {
-                    "unowned_plots": [
+                    "plots": [
                         {
                             "x": t.x,
                             "y": t.y,
-                            "price": t.plot.price if t.plot else None,
+                            "value": t.plot.value if t.plot else None,
                             "plot_type": t.plot.plot_type.value if t.plot else None,
+                            "owner": f"{t.plot.owner_kind}:{t.plot.owner_id}" if t.plot else None,
                             "city_id": t.city_id,
+                            "roads": t.plot.roads if t.plot else None,
+                            "combined": {s: pid for s, pid in t.plot.combined.items() if pid}
+                            if t.plot
+                            else None,
                         }
-                        for t in unowned[:limit]
+                        for t in candidates[:limit]
                     ],
                     "road_build_cost": self.world.config.road_build_cost,
+                    "road_build_steel": self.world.config.road_build_steel,
                 },
             }
 
-        if name == "buy_plot":
-            r = self.world.buy_plot(kind, aid, int(args["x"]), int(args["y"]))
+        if name == "propose_plot_buy":
+            r = self.world.propose_plot_buy(
+                kind,
+                aid,
+                str(args["to"]),
+                int(args["x"]),
+                int(args["y"]),
+                int(args["price"]),
+            )
             return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "propose_plot_sell":
+            r = self.world.propose_plot_sell(
+                kind,
+                aid,
+                str(args["to"]),
+                int(args["x"]),
+                int(args["y"]),
+                int(args["price"]),
+            )
+            return {"ok": r.ok, "message": r.message, "data": r.data}
+
+        if name == "buy_plot":
+            return {
+                "ok": False,
+                "message": "buy_plot removed — use propose_plot_buy then accept_proposal",
+            }
 
         if name == "build_building":
             building_id = str(args.get("building_id", "foundry"))
@@ -681,7 +745,7 @@ class ToolExecutor:
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "build_road":
-            r = self.world.build_road(kind, aid, int(args["x"]), int(args["y"]))
+            r = self.world.build_road(kind, aid, int(args["x"]), int(args["y"]), str(args["side"]))
             return {"ok": r.ok, "message": r.message, "data": r.data}
 
         if name == "merge_plots":

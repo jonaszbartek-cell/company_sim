@@ -68,6 +68,10 @@ def test_produce_steel():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td))
         player = w.companies["player"]
+        # Companies start with no plots — claim one for the production test
+        tile = w.grid.get(1, 1)
+        assert tile.plot
+        tile.plot.claim("company", "player")
         owned = w.owned_plots("company", "player")
         assert owned
         t = owned[0]
