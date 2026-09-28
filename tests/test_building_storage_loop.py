@@ -64,8 +64,13 @@ def _foundry_loop(w: World, company_id: str) -> dict:
     r = w.build_building("company", company_id, x, y, "foundry")
     assert r.ok, r.message
     assert tile.plot.building is not None
+    # Hard slots materialized at build (zeros kept)
+    assert "iron_ore" in tile.plot.building.storage.as_dict()
+    assert tile.plot.building.storage.get("iron_ore") == 0
+    assert tile.plot.building.storage_capacity["iron_ore"] == 10
+    assert tile.plot.building.storage_capacity["steel"] == 10
     cap = w.content.storage_capacity_for_building("foundry")
-    assert cap["iron_ore"] == 10 and cap["steel"] == 10
+    assert set(tile.plot.building.storage_capacity) == set(cap)
 
     r = w.set_production_method("company", company_id, x, y, "make_steel")
     assert r.ok, r.message
@@ -261,3 +266,59 @@ def test_market_seed_lists_every_item():
         r = w.buy_from_market("company", "player", "steel", 3)
         assert r.ok
         assert r.data["spent"] == 3
+
+
+def test_reconcile_adds_slots_and_keeps_orphan_stock():
+    """Catalog updates must not wipe stock; empty obsolete slots are dropped."""
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        tile = _standard_city_plot(w)
+        _buy_plot(w, "player", tile)
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 20)
+        w.build_building("company", "player", tile.x, tile.y, "foundry")
+        b = tile.plot.building
+        assert "steel" in b.storage_capacity
+        # Simulate an old save missing a slot + carrying obsolete stock
+        b.storage_capacity.pop("steel", None)
+        b.storage.unreserve_slot("steel")
+        b.storage.reserve_slots(["legacy_scrap"])
+        b.storage_capacity["legacy_scrap"] = 10
+        b.storage.set("legacy_scrap", 3)
+        report = w.reconcile_all_building_storage()
+        assert "steel" in b.storage_capacity
+        assert b.storage.get("steel") == 0
+        assert "legacy_scrap" not in b.storage_capacity
+        assert b.storage.get("legacy_scrap") == 3  # orphan kept until withdrawn
+        assert any("steel" in (r.get("added") or []) for r in report)
+
+
+def test_legacy_building_without_capacity_materializes_on_ensure():
+    with tempfile.TemporaryDirectory() as td:
+        w = _loop_world(Path(td))
+        tile = _standard_city_plot(w)
+        _buy_plot(w, "player", tile)
+        player = w.companies["player"]
+        player.inventory.set("construction_materials", 20)
+        w.build_building("company", "player", tile.x, tile.y, "foundry")
+        b = tile.plot.building
+        b.storage_capacity.clear()
+        b.storage.reserved.clear()
+        b.storage.quantities.clear()
+        w.ensure_building_storage(b)
+        assert b.storage_capacity
+        assert all(b.storage.get(i) == 0 for i in b.storage_capacity)
+
+
+def test_placeholder_arts_exist_for_catalog():
+    root = Path(__file__).resolve().parents[1] / "web" / "assets"
+    c = GameContent.load()
+    for item in c.items.all():
+        assert (root / "goods" / f"{item.id}.svg").is_file(), item.id
+        assert item.to_public_dict()["art"].endswith(f"/goods/{item.id}.svg")
+    for b in c.buildings.all():
+        assert (root / "buildings" / "map" / f"{b.id}.svg").is_file(), b.id
+        assert (root / "buildings" / "ui" / f"{b.id}.svg").is_file(), b.id
+        art = b.to_public_dict()["art"]
+        assert art["map"].endswith(f"/map/{b.id}.svg")
+        assert art["ui"].endswith(f"/ui/{b.id}.svg")

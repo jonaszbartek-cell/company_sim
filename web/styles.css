@@ -101,6 +101,72 @@ button:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 #tool-result { max-height: 180px; overflow: auto; font-size: 0.72rem; }
 
+.art-preview {
+  width: 48px;
+  height: 48px;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.12);
+  background: #12171b;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+.art-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 0.35rem;
+  margin: 0 0 0.8rem;
+  max-height: 140px;
+  overflow: auto;
+}
+.art-gallery button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.25rem;
+  background: rgba(0,0,0,0.28);
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-weight: 500;
+  border: 1px solid transparent;
+}
+.art-gallery button.active {
+  border-color: var(--accent);
+  color: var(--text);
+}
+.art-gallery img {
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+.icon-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background: rgba(0,0,0,0.25);
+  padding: 0.5rem;
+  border-radius: 6px;
+  font-size: 0.8rem;
+  margin-bottom: 0.6rem;
+  max-height: 180px;
+  overflow: auto;
+}
+.icon-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+.icon-row img {
+  width: 28px;
+  height: 28px;
+  object-fit: contain;
+  flex-shrink: 0;
+  border-radius: 4px;
+  background: rgba(0,0,0,0.25);
+}
+.icon-row .meta { color: var(--muted); font-size: 0.72rem; }
+.icon-empty { color: var(--muted); font-size: 0.8rem; }
+
 .setup {
   position: fixed; inset: 0; display: grid; place-items: center;
   background:
