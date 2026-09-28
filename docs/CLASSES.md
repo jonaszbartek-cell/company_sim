@@ -7,7 +7,7 @@ Agent (Company | City)
   cash, inventory, acted_this_day
   └── owned Plots (via world)
         └── Building (idle|working, chosen production method)
-              ├── storage Inventory (plot-owner owned; cap 10 per I/O good)
+              ├── storage Inventory (hard slots materialized on build; plot-owner owned; cap 10)
               └── ProductionMethod → Items
 
 Market
