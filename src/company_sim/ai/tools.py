@@ -621,7 +621,8 @@ def build_actor_context(world: World, actor: Actor) -> str:
     if len(owned) > 12:
         owned_lines.append(f"  ... +{len(owned) - 12} more")
 
-    pending_n = len(world.proposals.pending_for(actor.kind, actor.id))
+    pending_inbox = world.proposals.pending_addressed_to(actor.kind, actor.id)
+    pending_n = len(pending_inbox)
 
     return (
         f"Day {world.day}. You are {actor.kind} '{actor.name}' (id={actor.id}).\n"
@@ -641,6 +642,7 @@ def build_actor_context(world: World, actor: Actor) -> str:
             if actor.kind == "city"
             else (
                 "Companies with no land: list_plots_for_sale then ONE propose_plot_buy then done. "
+                "Empty owned plot: build_building then done. "
                 "Otherwise: get_status → act → done. "
             )
         )

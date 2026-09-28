@@ -156,7 +156,10 @@ def main() -> None:
         owned = world.owned_plots("city", city_id)
         print(f"  city {city_id}: cash={city_obj.cash} plots={len(owned)}")
     print(f"market listings={len(world.market.listings)}")
-    print(f"proposals pending={sum(1 for p in world.proposals.proposals if p.status == 'pending')}")
+    pending_n = sum(
+        1 for p in world.proposals.proposals.values() if p.status == "pending"
+    )
+    print(f"proposals pending={pending_n}")
     print(f"proposals total={len(world.proposals.proposals)}")
     traces = sorted((td / "llm_debug").rglob("*.txt")) if (td / "llm_debug").exists() else []
     print(f"llm_debug traces={len(traces)}")

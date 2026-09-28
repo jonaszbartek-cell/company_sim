@@ -136,7 +136,8 @@ class AIScheduler:
         system = system_prompt_for(actor)
         tools = tool_definitions_for(actor)
         known_tools = {str(d["function"]["name"]) for d in tools}
-        pending = world.proposals.pending_for(actor.kind, actor.id)
+        pending = world.proposals.pending_addressed_to(actor.kind, actor.id)
+        owned = world.owned_plots(actor.kind, actor.id)
         if pending:
             bits = []
             for p in pending[:4]:
@@ -150,9 +151,17 @@ class AIScheduler:
                 + ". Call accept_proposal(proposal_id=…) for fair offers "
                 "(plot_buy price>=80) or reject_proposal, then done."
             )
-        elif actor.kind == "company" and not world.owned_plots(actor.kind, actor.id):
+        elif actor.kind == "company" and not owned:
             now_hint = (
                 "NOW: you own no land. Call list_plots_for_sale, then ONE propose_plot_buy, then done."
+            )
+        elif actor.kind == "company" and owned and all(
+            t.plot and t.plot.building is None for t in owned
+        ):
+            t0 = owned[0]
+            now_hint = (
+                f"NOW: you own empty plot(s). Call build_building(x={t0.x}, y={t0.y}, "
+                f"building_id=\"foundry\"), then done."
             )
         else:
             now_hint = (
@@ -186,8 +195,11 @@ class AIScheduler:
             }
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
-                final_note = f"{actor.name} [LLM]: {content or 'no tool calls'}"
                 rounds.append(round_rec)
+                if executor.log:
+                    final_note = f"{actor.name} [LLM]: {'; '.join(executor.log)}"
+                else:
+                    final_note = f"{actor.name} [LLM]: {content or 'no tool calls'}"
                 self._write_debug(world, actor, system, bundle, rounds, final_note)
                 return final_note
 

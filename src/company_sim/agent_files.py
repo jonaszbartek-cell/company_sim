@@ -162,9 +162,9 @@ class AgentFileStore:
             add(buildings, "shared")
             add(methods, "shared")
 
-        # 4) Pending proposals involving this actor (derived filter, not another file)
-        mine = world.proposals.pending_for(actor.kind, actor.id)
-        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
+        # 4) Pending proposals addressed TO this actor (inbox only)
+        mine = world.proposals.pending_addressed_to(actor.kind, actor.id)
+        mine_txt = "=== YOUR PENDING PROPOSALS (inbox) ===\n"
         if mine:
             mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
         else:
