@@ -136,9 +136,13 @@ def test_goods_index_file_written_and_packed():
         assert "=== GOODS INDEX ===" in text
         assert "iron_ore" in text
         assert "made_in:" in text
-        bundle = w.file_store.pack_for_agent(w, w.companies["player"], compact=True)
-        assert any("goods_index" in p for p in bundle.path_list())
-        assert "GOODS INDEX" in bundle.prompt_text
+        # Compact LLM packs use a stub; full text available via get_catalog / non-compact pack
+        compact = w.file_store.pack_for_agent(w, w.companies["player"], compact=True)
+        assert any("economy_catalogs_stub" in p or "goods_index" in p for p in compact.path_list())
+        assert "get_catalog" in compact.prompt_text
+        full = w.file_store.pack_for_agent(w, w.companies["player"], compact=False)
+        assert any("goods_index" in p for p in full.path_list())
+        assert "GOODS INDEX" in full.prompt_text
 
 
 def test_public_dict_exposes_indexes():

@@ -144,8 +144,8 @@ class GamePersistence:
         mail_txt = ""
         if world.mailboxes is not None:
             mail_txt = world.mailboxes.render_for_agent(actor.kind, actor.id)
-        mine = world.proposals.pending_for(actor.kind, actor.id)
-        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
+        mine = world.proposals.pending_addressed_to(actor.kind, actor.id)
+        mine_txt = "=== YOUR PENDING PROPOSALS (inbox) ===\n"
         if mine:
             mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
         else:

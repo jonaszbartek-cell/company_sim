@@ -263,13 +263,6 @@ function draw() {
       ctx.fillRect(px + 1, py + 1, cellSize - 2, cellSize - 2);
     }
 
-    // Roads / crossroads via mask art
-    const mask = t.road_mask != null ? t.road_mask : roadMaskFromPlot(t.plot);
-    if (mask) {
-      const roadImg = loadArt(roadArt(mask));
-      drawImageFit(roadImg, px, py, cellSize, cellSize);
-    }
-
     if (t.plot.combined) {
       for (const side of Object.keys(t.plot.combined)) {
         drawCombineMark(px, py, side, cellSize);
@@ -308,6 +301,13 @@ function draw() {
           ctx.fillText(`${bid} ${fw}x${fh}`, ox + ax * cellSize + 4, oy + ay * cellSize + cellSize - 4);
         }
       }
+    }
+
+    // Roads after buildings so edge asphalt stays visible on building plots
+    const mask = t.road_mask != null ? t.road_mask : roadMaskFromPlot(t.plot);
+    if (mask) {
+      const roadImg = loadArt(roadArt(mask));
+      drawImageFit(roadImg, px, py, cellSize, cellSize);
     }
   }
 

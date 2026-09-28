@@ -124,6 +124,16 @@ class ProposalBook:
         rows.sort(key=lambda p: p.id)
         return rows
 
+    def pending_addressed_to(self, kind: str, actor_id: str) -> list[DirectProposal]:
+        """Proposals this actor can accept/reject (they are the recipient)."""
+        rows = [
+            p
+            for p in self.proposals.values()
+            if p.status == "pending" and p.to_kind == kind and p.to_id == actor_id
+        ]
+        rows.sort(key=lambda p: p.id)
+        return rows
+
     def to_public_dict(self) -> dict:
         pending = [p for p in self.proposals.values() if p.status == "pending"]
         pending.sort(key=lambda p: p.id)

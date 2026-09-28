@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any
 from company_sim.actors import Actor, City
 from company_sim.ai.llm_client import LLMClient, parse_tool_calls
 from company_sim.ai.tools import (
-    TOOL_DEFINITIONS,
     ToolExecutor,
     build_actor_context,
     system_prompt_for,
@@ -130,14 +129,50 @@ class AIScheduler:
 
         if world.file_store is None:
             world.file_store = AgentFileStore(world.persistence.root)
+        from company_sim.ai.tools import tool_definitions_for
+
         bundle = world.file_store.pack_for_agent(world, actor, compact=True)
         executor = ToolExecutor(world, actor)
         system = system_prompt_for(actor)
+        tools = tool_definitions_for(actor)
+        known_tools = {str(d["function"]["name"]) for d in tools}
+        pending = world.proposals.pending_addressed_to(actor.kind, actor.id)
+        owned = world.owned_plots(actor.kind, actor.id)
+        if pending:
+            bits = []
+            for p in pending[:4]:
+                bits.append(
+                    f"#{p.id} {p.proposal_type} from {p.from_kind}:{p.from_id} "
+                    f"total={p.total}"
+                )
+            now_hint = (
+                "NOW: pending proposals for you — "
+                + "; ".join(bits)
+                + ". Call accept_proposal(proposal_id=…) for fair offers "
+                "(plot_buy price>=80) or reject_proposal, then done."
+            )
+        elif actor.kind == "company" and not owned:
+            now_hint = (
+                "NOW: you own no land. Call list_plots_for_sale, then ONE propose_plot_buy, then done."
+            )
+        elif actor.kind == "company" and owned and all(
+            t.plot and t.plot.building is None for t in owned
+        ):
+            t0 = owned[0]
+            now_hint = (
+                f"NOW: you own empty plot(s). Call build_building(x={t0.x}, y={t0.y}, "
+                f"building_id=\"foundry\"), then done."
+            )
+        else:
+            now_hint = (
+                "NOW: call tools only. Start with get_status, take 1-2 useful actions, then done."
+            )
         user = (
             bundle.prompt_text
             + "\n"
             + build_actor_context(world, actor)
-            + "\nNOW: call tools only. Start with get_status or list_plots_for_sale, then act, then done."
+            + "\n"
+            + now_hint
         )
         messages: list[dict[str, Any]] = [{"role": "user", "content": user}]
         rounds: list[dict[str, Any]] = []
@@ -147,12 +182,12 @@ class AIScheduler:
             resp = self.llm.chat(
                 system=system,
                 user=user,
-                tools=TOOL_DEFINITIONS,
+                tools=tools,
                 messages=messages,
             )
             msg = resp.message
             messages.append(msg)
-            tool_calls = parse_tool_calls(msg)
+            tool_calls = parse_tool_calls(msg, known_tools=known_tools)
             round_rec: dict[str, Any] = {
                 "assistant_content": (msg.get("content") or "").strip(),
                 "tool_calls": [],
@@ -160,8 +195,11 @@ class AIScheduler:
             }
             if not tool_calls:
                 content = (msg.get("content") or "").strip()
-                final_note = f"{actor.name} [LLM]: {content or 'no tool calls'}"
                 rounds.append(round_rec)
+                if executor.log:
+                    final_note = f"{actor.name} [LLM]: {'; '.join(executor.log)}"
+                else:
+                    final_note = f"{actor.name} [LLM]: {content or 'no tool calls'}"
                 self._write_debug(world, actor, system, bundle, rounds, final_note)
                 return final_note
 

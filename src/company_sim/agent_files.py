@@ -136,7 +136,7 @@ class AgentFileStore:
         add(gov, "shared", limit=2500 if compact else None)
         proposals = self.root / "proposals.txt"
         add(proposals, "shared", limit=2500 if compact else None)
-        # Economy catalogs — shared knowledge for every agent (goods / buildings / methods)
+        # Economy catalogs — always on disk; compact prompts use a stub + get_catalog tool
         goods = self.root / "goods_index.txt"
         buildings = self.root / "buildings_catalog.txt"
         methods = self.root / "production_methods_catalog.txt"
@@ -144,14 +144,27 @@ class AgentFileStore:
             world.persistence.save_goods_index(world)
             world.persistence.save_buildings_catalog(world)
             world.persistence.save_methods_catalog(world)
-        # Full catalogs (not truncated) so every agent can see all economy data
-        add(goods, "shared")
-        add(buildings, "shared")
-        add(methods, "shared")
+        if compact:
+            stub = (
+                "=== ECONOMY CATALOGS ===\n"
+                "Full catalogs are on disk (goods_index / buildings_catalog / "
+                "production_methods_catalog). Use get_catalog(section=goods|buildings|"
+                "methods|good, id=...) to look up any good, building, or method.\n"
+                "Examples: get_catalog(section=\"buildings\"); "
+                "get_catalog(section=\"methods\", id=\"make_steel\"); "
+                "get_catalog(section=\"good\", id=\"steel\").\n"
+            )
+            files.append(PackedFile(path="(derived)/economy_catalogs_stub", role="shared", chars=len(stub)))
+            chunks.append(stub)
+        else:
+            # Full catalogs when compact=False
+            add(goods, "shared")
+            add(buildings, "shared")
+            add(methods, "shared")
 
-        # 4) Pending proposals involving this actor (derived filter, not another file)
-        mine = world.proposals.pending_for(actor.kind, actor.id)
-        mine_txt = "=== YOUR PENDING PROPOSALS ===\n"
+        # 4) Pending proposals addressed TO this actor (inbox only)
+        mine = world.proposals.pending_addressed_to(actor.kind, actor.id)
+        mine_txt = "=== YOUR PENDING PROPOSALS (inbox) ===\n"
         if mine:
             mine_txt += "\n".join(p.to_text_line() for p in mine) + "\n"
         else:

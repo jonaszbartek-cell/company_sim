@@ -562,6 +562,30 @@ def tool_name(defn: dict[str, Any]) -> str:
     return str(defn["function"]["name"])
 
 
+# Market / company trading tools cities cannot use.
+COMPANY_ONLY_TOOLS = frozenset(
+    {
+        "get_market",
+        "post_sell",
+        "post_buy",
+        "buy_from_market",
+        "retract_sell",
+        "retract_buy",
+        "bid_government_contract",
+        "fulfill_government_contract",
+    }
+)
+
+
+def tool_definitions_for(actor: Actor) -> list[dict[str, Any]]:
+    """Tool schemas exposed to the LLM for this actor's turn."""
+    if actor.kind == "city":
+        skip = COMPANY_ONLY_TOOLS
+    else:
+        skip = CITY_ONLY_TOOLS
+    return [d for d in TOOL_DEFINITIONS if tool_name(d) not in skip]
+
+
 def player_company_tool_definitions() -> list[dict[str, Any]]:
     """Tool schemas a player company can run (same set as company AI agents)."""
     return [d for d in TOOL_DEFINITIONS if tool_name(d) not in PLAYER_EXCLUDED_TOOLS]
@@ -597,15 +621,32 @@ def build_actor_context(world: World, actor: Actor) -> str:
     if len(owned) > 12:
         owned_lines.append(f"  ... +{len(owned) - 12} more")
 
+    pending_inbox = world.proposals.pending_addressed_to(actor.kind, actor.id)
+    pending_n = len(pending_inbox)
+
     return (
         f"Day {world.day}. You are {actor.kind} '{actor.name}' (id={actor.id}).\n"
         f"Cash: {actor.cash} | Inventory: {actor.inventory.as_dict()}\n"
         f"Owned plots ({len(owned)}):\n"
         + ("\n".join(owned_lines) if owned_lines else "  (none)")
         + "\n"
-        "RULE: reply with tool calls only (no prose). "
-        "Companies with no land: list_plots_for_sale then propose_plot_buy then done. "
-        "Otherwise: get_status → act → done. 1-3 tools then done."
+        + (
+            f"Pending proposals addressed to you: {pending_n}. "
+            "Call list_proposals then accept_proposal or reject_proposal first.\n"
+            if pending_n
+            else "Pending proposals addressed to you: 0.\n"
+        )
+        + "RULE: reply with tool calls only (no prose). "
+        + (
+            "City: list_proposals → accept/reject → done. "
+            if actor.kind == "city"
+            else (
+                "Companies with no land: list_plots_for_sale then ONE propose_plot_buy then done. "
+                "Empty owned plot: build_building then done. "
+                "Otherwise: get_status → act → done. "
+            )
+        )
+        + "1-3 tools then done."
     )
 
 
@@ -618,19 +659,19 @@ def system_prompt_for(actor: Actor) -> str:
         return (
             base
             + "You administer a city. You CANNOT use the market. "
-            "Procure goods with post_government_contract then award_government_contract. "
-            "Sell/buy land with propose_plot_sell / propose_plot_buy (accept/reject). "
-            "Build edge roads with build_road (side N/E/S/W, costs 1 steel). "
-            "Combine adjacent owned plots with merge_plots when no road between. "
-            "Accept or reject pending proposals addressed to you."
+            "FIRST each turn: list_proposals — if any plot_buy/goods proposals are addressed to you, "
+            "accept_proposal (plot_buy price >= 80) or reject_proposal, then done. "
+            "Only after clearing pending proposals: post_government_contract / award_government_contract, "
+            "propose_plot_sell, build_road (side N/E/S/W, costs 1 steel), or merge_plots. "
+            "Do NOT propose_plot_buy for plots you already own."
         )
     return (
         base
         + "You run a company. Goal: strongest firm. "
-        "Buy land with propose_plot_buy (cities own plots at start). "
-        "Build foundries, produce, trade on the market, bid on government contracts. "
+        "Buy land with propose_plot_buy (cities own plots at start) — one plot offer per turn is enough, then done. "
+        "After you own a plot: build_building, set_production_method, deposit_to_building, produce, withdraw, trade. "
         "Use propose_sell/propose_buy for direct goods deals. "
-        "Accept or reject pending proposals addressed to you. "
+        "Accept or reject pending proposals addressed to you (list_proposals). "
         "Build roads with build_road (side N/E/S/W, costs 1 steel)."
     )
 
