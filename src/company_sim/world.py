@@ -45,6 +45,8 @@ class WorldConfig:
     market_seed_price: int = 1
     # When set, place city centers randomly (not on a regular grid/line) using this seed
     city_placement_seed: int | None = None
+    # When True, scatter small companies on random city plots (not nearest-to-hall)
+    random_small_company_sites: bool = False
     # Deprecated aliases (tests / older callers); folded into square map_size = max(w, h)
     map_width: int | None = None
     map_height: int | None = None
@@ -221,7 +223,9 @@ class World:
         # Engine-scripted small companies around each City Hall + startup roads
         from company_sim.small_companies import spawn_small_companies, wire_startup_roads
 
-        spawn_small_companies(world)
+        spawn_small_companies(
+            world, random_sites=bool(world.config.random_small_company_sites)
+        )
         wire_startup_roads(world)
 
         world._seed_market()

@@ -23,7 +23,7 @@ WEB_DIR = Path(__file__).resolve().parents[2] / "web"
 class SetupBody(BaseModel):
     ai_companies: int = Field(default=2, ge=0, le=12)
     # Engine-scripted small firms per city (plots around City Hall)
-    small_companies_per_city: int = Field(default=0, ge=0, le=20)
+    small_companies_per_city: int = Field(default=0, ge=0, le=30)
     cities: int = Field(default=1, ge=1, le=8)
     map_size: int = Field(default=12, ge=2, le=128)
     # Percent of all plots that become specialized mine/well resource clusters
@@ -31,6 +31,8 @@ class SetupBody(BaseModel):
     llm_debug: bool = False
     # When set, place cities randomly (not a grid/line) using this RNG seed
     city_placement_seed: int | None = Field(default=None, ge=0)
+    # Test/demo: scatter small companies on random city plots instead of near hall
+    random_small_company_sites: bool = False
 
 
 class BuildBody(BaseModel):
@@ -242,6 +244,7 @@ def create_app() -> FastAPI:
                     specialized_plot_percent=body.specialized_plot_percent,
                     llm_debug=bool(body.llm_debug),
                     city_placement_seed=body.city_placement_seed,
+                    random_small_company_sites=bool(body.random_small_company_sites),
                 )
             )
             app.state.world = world

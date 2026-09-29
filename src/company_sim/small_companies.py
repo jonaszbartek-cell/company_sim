@@ -50,6 +50,43 @@ def _candidate_plots_near_hall(
     return [(x, y) for _, _, x, y in ranked[:count]]
 
 
+def _candidate_plots_random(
+    world: World,
+    city_id: str,
+    hall: tuple[int, int],
+    count: int,
+    *,
+    rng: random.Random,
+    min_hall_dist: int = 3,
+) -> list[tuple[int, int]]:
+    """Empty city-owned plots chosen at random (not clustered around the hall).
+
+    Used by tests to stress road wiring when companies are scattered.
+    Prefers sites at least ``min_hall_dist`` from the hall when available.
+    """
+    far: list[tuple[int, int]] = []
+    near: list[tuple[int, int]] = []
+    for tile in world.grid.tiles:
+        plot = tile.plot
+        if not plot or not plot.owned_by("city", city_id):
+            continue
+        if plot.building is not None:
+            continue
+        dist = manhattan((tile.x, tile.y), hall)
+        if dist == 0:
+            continue
+        if dist >= min_hall_dist:
+            far.append((tile.x, tile.y))
+        else:
+            near.append((tile.x, tile.y))
+    rng.shuffle(far)
+    rng.shuffle(near)
+    picked = far[:count]
+    if len(picked) < count:
+        picked.extend(near[: count - len(picked)])
+    return picked
+
+
 def _pick_building_and_method(
     world: World, plot_type: PlotType, rng: random.Random
 ) -> tuple[str, str | None]:
@@ -97,8 +134,17 @@ def _place_free_building(
     return building
 
 
-def spawn_small_companies(world: World, *, rng: random.Random | None = None) -> list[Company]:
-    """Claim plots around each city hall, build random industry, return new companies."""
+def spawn_small_companies(
+    world: World,
+    *,
+    rng: random.Random | None = None,
+    random_sites: bool = False,
+) -> list[Company]:
+    """Claim plots around each city hall, build random industry, return new companies.
+
+    When ``random_sites`` is True, place companies on random city-owned plots
+    (not nearest-to-hall). Intended for stress tests of road wiring.
+    """
     per_city = int(world.config.small_companies_per_city)
     if per_city <= 0:
         return []
@@ -108,7 +154,10 @@ def spawn_small_companies(world: World, *, rng: random.Random | None = None) -> 
         hall = city_hall_coord(world, city.id)
         if hall is None:
             continue
-        sites = _candidate_plots_near_hall(world, city.id, hall, per_city)
+        if random_sites:
+            sites = _candidate_plots_random(world, city.id, hall, per_city, rng=rng)
+        else:
+            sites = _candidate_plots_near_hall(world, city.id, hall, per_city)
         for i, (x, y) in enumerate(sites):
             cid = f"small_{city.id}_{i + 1}"
             company = Company(
