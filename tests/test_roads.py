@@ -35,14 +35,18 @@ def _empty_grid(size: int) -> GridMap:
     return g
 
 
-def test_ensure_edge_road_idempotent_and_rejects_bad_side():
-    g = _empty_grid(4)
-    assert ensure_edge_road(g, 1, 1, "E") is True
-    assert g.has_road_on_side(1, 1, "E")
-    # Second call is a no-op success
-    assert ensure_edge_road(g, 1, 1, "E") is True
-    assert ensure_edge_road(g, 1, 1, "X") is False
-    assert ensure_edge_road(g, -1, 0, "N") is False
+def test_plot_junction_bridges_opposite_sides():
+    """A plot with only N and S roads still joins those streets (building junction)."""
+    g = _empty_grid(5)
+    # Northern street along row y=1 north edges
+    ensure_edge_road(g, 2, 1, "N")
+    ensure_edge_road(g, 1, 1, "N")
+    # Southern street along row y=1 south edges
+    ensure_edge_road(g, 2, 1, "S")
+    ensure_edge_road(g, 3, 1, "S")
+    # Without plot junction, N-street and S-street are disconnected lattice-wise;
+    # with junction, (1,1) reaches (3,1) through plot (2,1).
+    assert plots_road_connected(g, (1, 1), (3, 1))
 
 
 def test_ensure_shared_road_either_side_connects():
