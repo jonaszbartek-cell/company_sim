@@ -203,6 +203,36 @@ def grid_edge_neighbors(edge: GridEdge) -> list[GridEdge]:
     return out
 
 
+def plot_junction_edges(grid: GridMap, edge: GridEdge) -> list[GridEdge]:
+    """Other roaded sides of plots that touch ``edge`` (building/plot as junction).
+
+    Opposite sides of the same plot do not share a lattice vertex, but a building
+    on that plot bridges them — so all roaded incident edges of a plot are one
+    network hop (cost 0).
+    """
+    out: list[GridEdge] = []
+    seen: set[GridEdge] = {edge}
+    for x, y, side in edge_touching_plots(edge):
+        if not grid.in_bounds(x, y) or grid.get(x, y).plot is None:
+            continue
+        # Plot only junctions if it owns a road on this edge
+        if not grid.has_road_on_side(x, y, side):
+            continue
+        for _s, other in plot_incident_edges(x, y):
+            if other in seen:
+                continue
+            if not grid_edge_has_road(grid, other):
+                continue
+            seen.add(other)
+            out.append(other)
+    return out
+
+
+def street_graph_neighbors(grid: GridMap, edge: GridEdge) -> list[GridEdge]:
+    """Street hops from ``edge``: lattice adjacencies + same-plot junctions."""
+    return grid_edge_neighbors(edge) + plot_junction_edges(grid, edge)
+
+
 def _edge_in_map(grid: GridMap, edge: GridEdge) -> bool:
     """True if the edge touches at least one in-bounds plot cell."""
     for x, y, _side in edge_touching_plots(edge):
@@ -295,10 +325,13 @@ def shortest_street_path(
             # Still search: a cheaper goal edge may appear, but with
             # non-negative weights we can stop when we first pop a goal edge.
             break
-        for nxt in grid_edge_neighbors(edge):
+        for nxt in street_graph_neighbors(grid, edge):
             step = street_edge_cost(grid, nxt)
             if step is None:
                 continue
+            # Plot-junction hops onto already-roaded edges are free
+            if grid_edge_has_road(grid, nxt) and nxt not in grid_edge_neighbors(edge):
+                step = 0.0
             ncost = cost + step
             if ncost < best.get(nxt, float("inf")):
                 best[nxt] = ncost
@@ -412,7 +445,7 @@ def plots_road_connected(grid: GridMap, start: Coord, goal: Coord) -> bool:
         edge = q.popleft()
         if edge in goal_edges:
             return True
-        for nxt in grid_edge_neighbors(edge):
+        for nxt in street_graph_neighbors(grid, edge):
             if nxt in seen:
                 continue
             if not grid_edge_has_road(grid, nxt):
@@ -439,7 +472,7 @@ def connected_component(grid: GridMap, start: Coord) -> set[Coord]:
         q.append(e)
     while q:
         edge = q.popleft()
-        for nxt in grid_edge_neighbors(edge):
+        for nxt in street_graph_neighbors(grid, edge):
             if nxt in seen_edges:
                 continue
             if not grid_edge_has_road(grid, nxt):
@@ -449,8 +482,11 @@ def connected_component(grid: GridMap, start: Coord) -> set[Coord]:
 
     plots: set[Coord] = set()
     for edge in seen_edges:
-        for x, y, _side in edge_touching_plots(edge):
-            if grid.in_bounds(x, y) and grid.get(x, y).plot is not None:
+        for x, y, side in edge_touching_plots(edge):
+            if not grid.in_bounds(x, y) or grid.get(x, y).plot is None:
+                continue
+            # Only count plots that actually have this side roaded (access)
+            if grid.has_road_on_side(x, y, side):
                 plots.add((x, y))
     plots.add(start)
     return plots
