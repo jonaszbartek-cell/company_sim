@@ -78,39 +78,36 @@ function roadMaskFromPlot(plot) {
 /** Paint asphalt flush on the plot's outer edges — never through the tile center. */
 function drawRoadEdges(px, py, size, roads) {
   if (!roads) return;
-  // Strip thickness stays on the border (~22% of cell, min 2px).
-  const t = Math.max(2, Math.round(size * 0.22));
+  // Thin border strip (~12% of cell). Double-sided neighbors meet on the shared
+  // grid line without eating into the tile center.
+  const t = Math.max(2, Math.min(5, Math.round(size * 0.12)));
   const asphalt = "#3a3f46";
-  const stripe = "rgba(244,241,222,0.9)";
-  const line = Math.max(1, Math.round(t * 0.18));
+  const stripe = "rgba(244,241,222,0.85)";
+  const line = Math.max(1, Math.min(2, Math.round(t * 0.35)));
 
   ctx.fillStyle = asphalt;
   if (roads.N) {
     ctx.fillRect(px, py, size, t);
     ctx.fillStyle = stripe;
-    ctx.fillRect(px, py + Math.max(1, Math.floor(t * 0.25)), size, line);
-    ctx.fillRect(px, py + t - line - 1, size, line);
+    ctx.fillRect(px, py + Math.floor(t / 2), size, line);
     ctx.fillStyle = asphalt;
   }
   if (roads.S) {
     ctx.fillRect(px, py + size - t, size, t);
     ctx.fillStyle = stripe;
-    ctx.fillRect(px, py + size - t + 1, size, line);
-    ctx.fillRect(px, py + size - line - 1, size, line);
+    ctx.fillRect(px, py + size - t + Math.floor(t / 2), size, line);
     ctx.fillStyle = asphalt;
   }
   if (roads.W) {
     ctx.fillRect(px, py, t, size);
     ctx.fillStyle = stripe;
-    ctx.fillRect(px + Math.max(1, Math.floor(t * 0.25)), py, line, size);
-    ctx.fillRect(px + t - line - 1, py, line, size);
+    ctx.fillRect(px + Math.floor(t / 2), py, line, size);
     ctx.fillStyle = asphalt;
   }
   if (roads.E) {
     ctx.fillRect(px + size - t, py, t, size);
     ctx.fillStyle = stripe;
-    ctx.fillRect(px + size - t + 1, py, line, size);
-    ctx.fillRect(px + size - line - 1, py, line, size);
+    ctx.fillRect(px + size - t + Math.floor(t / 2), py, line, size);
     ctx.fillStyle = asphalt;
   }
   // Solid corner caps where two edge strips meet

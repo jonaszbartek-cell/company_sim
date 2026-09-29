@@ -172,9 +172,9 @@ def road_mask_svg(mask: int) -> str:
         '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">',
         '<rect width="64" height="64" fill="none"/>',
     ]
-    # Edge strip thickness (stays on the border; neighbors draw the other half)
-    thick = 10
-    line = 1.5
+    # Thin edge strip (stays on the border; neighbors draw the other half)
+    thick = 8
+    line = 1.25
     asphalt = "#3a3f46"
     stripe = "#f4f1de"
 
