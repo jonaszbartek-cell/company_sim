@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="178" height="420"
+     viewBox="0 0 178.0 420.0">
+  <!-- soft ground shadow -->
+  <ellipse cx="89.0" cy="51.0"
+           rx="76.8" ry="64.8"
+           fill="#000000" opacity="0.22"/>
+  <polygon points="4.0,56.0 164.0,56.0 164.0,14.0 4.0,14.0" fill="#5a189a" opacity="1.0"/>
+  <polygon points="164.0,56.0 174.0,46.0 174.0,4.0 164.0,14.0" fill="#c77dff" opacity="1.0"/>
+  <polygon points="4.0,14.0 164.0,14.0 174.0,4.0 14.0,4.0" fill="#ffffff" opacity="0.22"/>
+  <!-- window strip -->
+  <rect x="8.0" y="19.0" width="152.0"
+        height="3" fill="#ffffff" opacity="0.35" rx="1"/>
+  <text x="84.0" y="37.0" text-anchor="middle"
+        fill="#0b1014" font-family="Inter,Segoe UI,sans-serif" font-size="9" font-weight="700"
+        opacity="0.8">4×9</text>
+</svg>

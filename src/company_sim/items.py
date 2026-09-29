@@ -14,13 +14,12 @@ class Item:
     """
     A tradable / storable good used as production input or output.
 
-    Definitions are data-driven (see data/items.yaml). Runtime inventories
-    store quantities by item id — they do not clone Item objects per stack.
+    Add entries in data/items.yaml — inventories reference items by id.
     """
 
     id: str
     name: str
-    category: str = "general"  # e.g. raw, intermediate, finished, service
+    category: str = "general"
     description: str = ""
     stackable: bool = True
 
@@ -31,14 +30,20 @@ class Item:
             "category": self.category,
             "description": self.description,
             "stackable": self.stackable,
+            "art": f"/static/assets/goods/{self.id}.svg",
         }
 
 
 @dataclass
 class Inventory:
-    """Quantity map keyed by Item.id, with validation helpers."""
+    """Quantity map keyed by Item.id.
+
+    ``reserved`` keys are hard slots: they stay in ``quantities`` even at 0
+    (used for building storage that must show every allowed good).
+    """
 
     quantities: dict[str, int] = field(default_factory=dict)
+    reserved: set[str] = field(default_factory=set)
 
     def get(self, item_id: str) -> int:
         return int(self.quantities.get(item_id, 0))
@@ -46,10 +51,10 @@ class Inventory:
     def set(self, item_id: str, qty: int) -> None:
         if qty < 0:
             raise ValueError(f"Negative inventory for {item_id}")
-        if qty == 0:
+        if qty == 0 and item_id not in self.reserved:
             self.quantities.pop(item_id, None)
         else:
-            self.quantities[item_id] = qty
+            self.quantities[item_id] = int(qty)
 
     def add(self, item_id: str, qty: int) -> None:
         self.set(item_id, self.get(item_id) + qty)
@@ -68,6 +73,18 @@ class Inventory:
         for item_id, qty in outputs.items():
             self.add(item_id, qty)
 
+    def reserve_slots(self, item_ids: list[str] | set[str] | tuple[str, ...]) -> None:
+        """Materialize hard slots (qty 0 kept) for the given item ids."""
+        for item_id in item_ids:
+            self.reserved.add(item_id)
+            if item_id not in self.quantities:
+                self.quantities[item_id] = 0
+
+    def unreserve_slot(self, item_id: str) -> None:
+        self.reserved.discard(item_id)
+        if self.quantities.get(item_id, 0) == 0:
+            self.quantities.pop(item_id, None)
+
     def as_dict(self) -> dict[str, int]:
         return dict(self.quantities)
 
@@ -76,8 +93,6 @@ class Inventory:
 
 
 class ItemCatalog:
-    """Registry of Item definitions."""
-
     def __init__(self, items: dict[str, Item] | None = None) -> None:
         self._items: dict[str, Item] = dict(items or {})
 
@@ -93,6 +108,8 @@ class ItemCatalog:
                 description=row.get("description", ""),
                 stackable=bool(row.get("stackable", True)),
             )
+            if item.id in items:
+                raise ValueError(f"Duplicate item id in {path}: {item.id}")
             items[item.id] = item
         return cls(items)
 
@@ -126,10 +143,16 @@ def load_default_catalog() -> ItemCatalog:
     path = default_items_path()
     if path.exists():
         return ItemCatalog.from_yaml(path)
-    # Minimal fallback if data file missing
     return ItemCatalog(
         {
-            "materials": Item(id="materials", name="Materials", category="raw"),
-            "goods": Item(id="goods", name="Goods", category="finished"),
+            "iron_ore": Item(id="iron_ore", name="Iron Ore", category="raw"),
+            "coal": Item(id="coal", name="Coal", category="raw"),
+            "energy": Item(id="energy", name="Energy", category="utility"),
+            "steel": Item(id="steel", name="Steel", category="processed"),
+            "construction_materials": Item(
+                id="construction_materials",
+                name="Construction Materials",
+                category="processed",
+            ),
         }
     )

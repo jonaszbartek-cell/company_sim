@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="soil" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3f7d4e"/>
+      <stop offset="100%" stop-color="#2f5e3b"/>
+    </linearGradient>
+    <pattern id="blades" width="8" height="8" patternUnits="userSpaceOnUse">
+      <path d="M2 8 Q3 3 4 8" stroke="#6fbf7a" stroke-width="1" fill="none" opacity="0.55"/>
+      <path d="M6 8 Q7 2 8 8" stroke="#58a864" stroke-width="1" fill="none" opacity="0.4"/>
+    </pattern>
+  </defs>
+  <rect width="64" height="64" rx="6" fill="url(#soil)"/>
+  <rect width="64" height="64" rx="6" fill="url(#blades)"/>
+  <rect x="1" y="1" width="62" height="62" rx="5" fill="none" stroke="#9ad4a3" stroke-opacity="0.25"/>
+</svg>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#90e0ef"/>
+      <stop offset="100%" stop-color="#0077b6"/>
+    </linearGradient>
+  </defs>
+  <rect width="72" height="72" rx="15.8" fill="#0f1418"/>
+  <rect x="5.8" y="5.8" width="60.5" height="60.5"
+        rx="13.0" fill="url(#g)"/>
+  <circle cx="56.2" cy="15.8" r="4.3" fill="#ffffff" opacity="0.35"/>
+  <text x="50%" y="46%" text-anchor="middle" fill="#0b1014" font-family="Inter,Segoe UI,sans-serif"
+        font-size="10" font-weight="700" letter-spacing="0.04em">BLD</text>
+  <text x="50%" y="68%" text-anchor="middle" fill="#0b1014" font-family="Inter,Segoe UI,sans-serif"
+        font-size="8" font-weight="600" opacity="0.85">AF</text>
+</svg>

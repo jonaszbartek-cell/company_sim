@@ -1,0 +1,168 @@
+# Editable game content — Buildings
+# Add a building by appending under `buildings:`.
+# Production methods reference buildings by `building_id`.
+#
+# Costs (placeholders):
+#   build_cost: cash paid on construct (default 100)
+#   build_cost_items: inventory goods consumed (default 10x construction_materials)
+#
+# Plot rules:
+#   Mine → specialized_mine only (method locked at build)
+#   Rig  → specialized_well only (method locked at build; oil/gas/water via method)
+#   City Hall → ceremonial / admin (no production); every city starts with one
+#   All other factories → standard + both specialized types
+
+buildings:
+  - id: city_hall
+    name: City Hall
+    description: Civic landmark. Does nothing — placed by the engine at each city's territory center at game start (not buildable by players/agents).
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    buildable: false
+    locks_production_method: false
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: mine
+    name: Mine
+    description: Extracts ores and minerals (no recipe inputs)
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    locks_production_method: true
+    allowed_plot_types:
+      - specialized_mine
+
+  - id: rig
+    name: Rig
+    description: Extracts oil, natural gas, and water (no recipe inputs)
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    locks_production_method: true
+    allowed_plot_types:
+      - specialized_well
+
+  - id: foundry
+    name: Foundry
+    description: Smelts ores into metals
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: refinery
+    name: Refinery
+    description: Refines oil into fuel and propellant
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: chemical_plant
+    name: Chemical Plant
+    description: Produces industrial and advanced chemicals
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: manufacturing_facility
+    name: Manufacturing Facility
+    description: Makes construction goods, components, and materials
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: electronics_facility
+    name: Electronics Facility
+    description: Produces electronic components and semiconductors
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: assembly_facility
+    name: Assembly Facility
+    description: Assembles finished goods and devices
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: car_manufacturing_facility
+    name: Car Manufacturing Facility
+    description: Builds ICE and electric cars
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: plane_factory
+    name: Plane Factory
+    description: Builds aircraft
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: rocket_factory
+    name: Rocket Factory
+    description: Builds rockets
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: satellite_factory
+    name: Satellite Factory
+    description: Builds satellites
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well
+
+  - id: power_plant
+    name: Power Plant
+    description: Produces energy from coal, gas, or fuel
+    build_cost: 100
+    build_cost_items:
+      construction_materials: 10
+    allowed_plot_types:
+      - standard
+      - specialized_mine
+      - specialized_well

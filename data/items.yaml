@@ -1,9 +1,242 @@
+# Editable game content — Items (goods)
+# Add a new item by appending under `items:` with a unique `id`.
+# Inventories, recipes, and the goods index reference items by `id`.
+# Categories are free-form tags for filtering / LLM context.
+
 items:
-  - id: materials
-    name: Materials
+  # --- Raw extracts (Mine / Rig) ---
+  - id: iron_ore
+    name: Iron Ore
     category: raw
-    description: PLACEHOLDER generic input good
-  - id: goods
-    name: Goods
+    description: Mined ore; Foundry input for steel
+
+  - id: copper_ore
+    name: Copper Ore
+    category: raw
+    description: Mined ore; Foundry input for copper
+
+  - id: bauxite
+    name: Bauxite
+    category: raw
+    description: Mined ore; Foundry input for aluminum
+
+  - id: coal
+    name: Coal
+    category: raw
+    description: Mined fuel; Foundry and Power Plant input
+
+  - id: limestone
+    name: Limestone
+    category: raw
+    description: Mined rock; Manufacturing input for cement
+
+  - id: silica
+    name: Silica
+    category: raw
+    description: Mined mineral; glass and electronics input
+
+  - id: rare_minerals
+    name: Rare Minerals
+    category: raw
+    description: Scarce mined minerals for advanced recipes
+
+  - id: oil
+    name: Oil
+    category: raw
+    description: Extracted by Rig; Refinery and Chemical Plant input
+
+  - id: natural_gas
+    name: Natural Gas
+    category: raw
+    description: Extracted by Rig; chemicals and power input
+
+  - id: water
+    name: Water
+    category: raw
+    description: Extracted by Rig; Chemical Plant input
+
+  # --- Utility ---
+  - id: energy
+    name: Energy
+    category: utility
+    description: Power produced by Power Plant; consumed by many recipes
+
+  # --- Foundry / Refinery metals & fuels ---
+  - id: steel
+    name: Steel
+    category: processed
+    description: Smelted metal from iron ore
+
+  - id: copper
+    name: Copper
+    category: processed
+    description: Smelted metal from copper ore
+
+  - id: aluminum
+    name: Aluminum
+    category: processed
+    description: Smelted metal from bauxite
+
+  - id: fuel
+    name: Fuel
+    category: processed
+    description: Refined from oil; engines, vehicles, power
+
+  - id: asphalt
+    name: Asphalt
+    category: processed
+    description: Co-product of fuel refining
+
+  - id: rocket_propellant
+    name: Rocket Propellant
+    category: processed
+    description: Advanced fuel for rockets
+
+  # --- Chemicals ---
+  - id: industrial_chemicals
+    name: Industrial Chemicals
+    category: processed
+    description: Basic chemicals from gas and water
+
+  - id: synthetic_materials
+    name: Synthetic Materials
+    category: processed
+    description: Mid-tier chemical feedstock
+
+  - id: advanced_chemicals
+    name: Advanced Chemicals
+    category: processed
+    description: High-tier chemicals for electronics and aerospace
+
+  - id: fertilizer
+    name: Fertilizer
+    category: processed
+    description: Agricultural chemical product
+
+  - id: rubber
+    name: Rubber
+    category: processed
+    description: Elastic material for tires and robots
+
+  # --- Manufacturing ---
+  - id: cement
+    name: Cement
+    category: processed
+    description: Construction binder from limestone
+
+  - id: glass
+    name: Glass
+    category: processed
+    description: Made from silica
+
+  - id: plastics
+    name: Plastics
+    category: processed
+    description: Moldable materials from synthetics
+
+  - id: construction_materials
+    name: Construction Materials
+    category: processed
+    description: Building construction goods (placeholder build cost item)
+
+  - id: components
+    name: Components
+    category: processed
+    description: Mechanical parts from metals and plastics
+
+  - id: machinery
+    name: Machinery
+    category: processed
+    description: Industrial machines
+
+  - id: textiles
+    name: Textiles
+    category: processed
+    description: Fabric products
+
+  - id: advanced_materials
+    name: Advanced Materials
+    category: processed
+    description: High-performance materials for aerospace
+
+  - id: tires
+    name: Tires
+    category: processed
+    description: Vehicle tires
+
+  # --- Electronics ---
+  - id: electronic_components
+    name: Electronic Components
+    category: processed
+    description: Basic electronic parts
+
+  - id: semiconductors
+    name: Semiconductors
+    category: processed
+    description: Chips from silica and chemicals
+
+  - id: advanced_electronics
+    name: Advanced Electronics
+    category: processed
+    description: High-end electronics assemblies
+
+  # --- Assembly / vehicles / aerospace ---
+  - id: appliances
+    name: Appliances
     category: finished
-    description: PLACEHOLDER generic output good
+    description: Consumer appliances
+
+  - id: batteries
+    name: Batteries
+    category: finished
+    description: Energy storage cells
+
+  - id: engines
+    name: Engines
+    category: finished
+    description: Motive power units
+
+  - id: robots
+    name: Robots
+    category: finished
+    description: Automated machines
+
+  - id: smartphone
+    name: Smartphone
+    category: finished
+    description: Consumer mobile device
+
+  - id: computer
+    name: Computer
+    category: finished
+    description: Computing hardware
+
+  - id: cars
+    name: Cars
+    category: finished
+    description: ICE cars from Car Manufacturing Facility
+
+  - id: electric_cars
+    name: Electric Cars
+    category: finished
+    description: Battery-electric cars
+
+  - id: aircraft
+    name: Aircraft
+    category: finished
+    description: Standard aircraft
+
+  - id: advanced_aircraft
+    name: Advanced Aircraft
+    category: finished
+    description: High-end aircraft
+
+  - id: rocket
+    name: Rocket
+    category: finished
+    description: Orbital launch vehicle
+
+  - id: satellite
+    name: Satellite
+    category: finished
+    description: Orbital satellite

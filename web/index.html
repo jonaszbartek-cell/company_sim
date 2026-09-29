@@ -7,12 +7,48 @@
   <link rel="stylesheet" href="/static/styles.css" />
 </head>
 <body>
-  <div id="app">
+  <div id="setup" class="setup">
+    <form id="setup-form" class="setup-card">
+      <h1>company_sim</h1>
+      <p class="setup-lead">Configure the map, then start. Cities own all plots in their territory; companies start with none.</p>
+      <label>AI companies
+        <input id="setup-companies" type="number" min="0" max="12" value="2" />
+      </label>
+      <label>Small companies per city
+        <input id="setup-small-per-city" type="number" min="0" max="20" value="0" />
+      </label>
+      <p class="setup-lead" style="margin-top:-0.4rem;font-size:0.85rem;opacity:0.85">
+        Engine-run firms that spawn around each City Hall with a random building; roads connect them to the hall and halls to each other.
+      </p>
+      <label>Agent cities
+        <input id="setup-cities" type="number" min="1" max="8" value="1" />
+      </label>
+      <label>Map size (plots per side)
+        <input id="setup-map" type="number" min="2" max="128" value="12" />
+      </label>
+      <label>Specialized resources (% of plots)
+        <input id="setup-specialized-pct" type="number" min="0" max="100" step="1" value="15" />
+      </label>
+      <p class="setup-lead" style="margin-top:-0.4rem;font-size:0.85rem;opacity:0.85">
+        Mine + well resource clusters (at least 5 of each when the map is large enough).
+      </p>
+      <label class="setup-check">
+        <input id="setup-llm-debug" type="checkbox" />
+        LLM debug (write per-turn traces under saves/llm_debug/)
+      </label>
+      <button id="btn-start" type="submit">Start game</button>
+      <p id="setup-error" class="setup-error" hidden></p>
+    </form>
+  </div>
+
+  <div id="app" hidden>
     <header>
       <div class="brand">company_sim</div>
-      <div id="hud-time" class="hud">t=0</div>
+      <div id="hud-time" class="hud">day 1</div>
       <div id="hud-cash" class="hud">cash=—</div>
       <button id="btn-pause" type="button">Pause</button>
+      <button id="btn-pass" type="button">Pass day</button>
+      <button id="btn-status" type="button">Status</button>
     </header>
     <main>
       <canvas id="map" width="960" height="720"></canvas>
@@ -20,21 +56,133 @@
         <h2>Selected</h2>
         <pre id="selected">Click a plot</pre>
         <div class="row">
-          <button id="btn-buy" type="button" disabled>Buy plot</button>
-          <button id="btn-build" type="button" disabled>Build workshop</button>
+          <button id="btn-plot-buy" type="button" disabled>Propose buy plot</button>
+          <button id="btn-plot-sell" type="button" disabled>Propose sell plot</button>
+        </div>
+      <div class="row build-row">
+          <label class="inline">Building
+            <select id="build-id">
+              <option value="foundry">foundry</option>
+            </select>
+          </label>
+          <img id="build-preview" class="art-preview" alt="" hidden />
+          <button id="btn-build" type="button" disabled>Build with method</button>
+          <button id="btn-produce" type="button" disabled>Produce</button>
+        </div>
+        <div id="build-gallery" class="art-gallery" aria-label="Building catalog"></div>
+        <div class="row">
+          <label class="inline">Production method
+            <select id="method-id">
+              <option value="make_steel">make_steel</option>
+            </select>
+          </label>
+          <button id="btn-set-method" type="button" disabled>Change method</button>
+        </div>
+        <p id="method-hint" class="setup-lead" style="margin:0.25rem 0 0.75rem;font-size:0.85rem;opacity:0.85">
+          Choose a method before Build. Change later anytime unless the building locks it (Mine/Rig).
+        </p>
+        <div class="row">
+          <label class="inline">Road side
+            <select id="road-side">
+              <option value="N">N</option>
+              <option value="E">E</option>
+              <option value="S">S</option>
+              <option value="W">W</option>
+            </select>
+          </label>
+          <button id="btn-road" type="button" disabled>Build road</button>
+          <button id="btn-merge" type="button" disabled>Combine</button>
+        </div>
+
+        <h2>Plots for sale</h2>
+        <pre id="plots-for-sale">—</pre>
+        <button id="btn-refresh-plots" type="button">Refresh plots</button>
+
+        <h2>Proposals</h2>
+        <pre id="proposals">—</pre>
+        <div class="row">
+          <input id="proposal-id" type="number" min="1" placeholder="#" style="width:4rem" />
+          <button id="btn-accept" type="button">Accept</button>
+          <button id="btn-reject" type="button">Reject</button>
+        </div>
+        <div class="form-grid">
+          <input id="trade-to" type="text" placeholder="to (ai_1 / city:city_a)" />
+          <input id="trade-item" type="text" placeholder="item" value="iron_ore" />
+          <input id="trade-qty" type="number" min="1" value="1" />
+          <input id="trade-price" type="number" min="0" value="10" />
         </div>
         <div class="row">
-          <button id="btn-road" type="button" disabled>Build road</button>
-          <button id="btn-merge" type="button" disabled>Merge with last</button>
+          <button id="btn-propose-sell" type="button">Propose sell</button>
+          <button id="btn-propose-buy" type="button">Propose buy</button>
         </div>
+
         <h2>Inventory</h2>
-        <pre id="inventory">—</pre>
+        <div id="inventory" class="icon-list">—</div>
+
+        <h2>Building storage</h2>
+        <div id="building-storage" class="icon-list">Select a plot with a building</div>
+
+        <h2>Market</h2>
+        <div id="market" class="icon-list">—</div>
+        <div class="form-grid">
+          <input id="mkt-item" type="text" placeholder="item" value="iron_ore" />
+          <input id="mkt-qty" type="number" min="1" value="1" />
+          <input id="mkt-price" type="number" min="0" value="10" />
+          <input id="mkt-listing" type="number" min="1" placeholder="listing #" />
+        </div>
+        <div class="row wrap">
+          <button id="btn-mkt-buy" type="button">Buy now</button>
+          <button id="btn-mkt-sell" type="button">Post sell</button>
+          <button id="btn-mkt-buy-order" type="button">Post buy</button>
+          <button id="btn-mkt-retract-sell" type="button">Retract sell</button>
+          <button id="btn-mkt-retract-buy" type="button">Retract buy</button>
+        </div>
+
+        <h2>Gov contracts</h2>
+        <pre id="gov-contracts">—</pre>
+        <div class="form-grid">
+          <input id="gov-id" type="number" min="1" placeholder="contract #" />
+          <input id="gov-price" type="number" min="0" value="100" placeholder="bid price" />
+        </div>
+        <div class="row">
+          <button id="btn-gov-refresh" type="button">Refresh</button>
+          <button id="btn-gov-bid" type="button">Bid</button>
+          <button id="btn-gov-fulfill" type="button">Fulfill</button>
+        </div>
+
+        <h2>Mail</h2>
+        <select id="mail-to"></select>
+        <textarea id="mail-body" rows="2" placeholder="Message…"></textarea>
+        <button id="btn-mail-send" type="button">Send</button>
+        <pre id="mail-log">—</pre>
+
+        <h2>Agent tools</h2>
+        <p class="hint">Same tools company AI agents use. Pick one, fill args, run.</p>
+        <select id="tool-select"></select>
+        <p id="tool-desc" class="hint">—</p>
+        <div id="tool-args" class="tool-args"></div>
+        <div class="row">
+          <button id="btn-tool-run" type="button">Run tool</button>
+          <button id="btn-tool-autofill" type="button">Fill from selection</button>
+        </div>
+        <pre id="tool-result">—</pre>
+
         <h2>AI</h2>
         <pre id="ai-log">—</pre>
         <pre id="ai-mode" class="hint">mode: —</pre>
+        <div id="llm-debug-panel" hidden>
+          <h2>LLM debug</h2>
+          <pre id="llm-debug-summary" class="hint">—</pre>
+          <div class="row">
+            <button id="btn-llm-debug-refresh" type="button">Refresh traces</button>
+          </div>
+          <select id="llm-debug-select"></select>
+          <button id="btn-llm-debug-view" type="button">View trace</button>
+          <pre id="llm-debug-trace">—</pre>
+        </div>
         <p class="hint">
-          Cities are LLM-run territories of normal roads/plots/buildings (no special city tile).
-          Soft tint = which city administers the cell. Gold-brown plots = municipal ownership.
+          Roads are edges on owned plots (N/E/S/W). Cost: 1 steel (consumed). Combine adjacent owned plots only with no road between.
+          Plot buy/sell are direct proposals — accept or reject. City-only gov tools (post/award/cancel) are not available to the player company.
         </p>
       </aside>
     </main>

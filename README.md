@@ -1,13 +1,15 @@
 # company_sim
 
-Real-time company economic simulator (Python + Web UI).
+Company economic simulator (Python + Web UI) with local LLM rivals.
 
-**City** and **Company** both inherit from **Actor** and share the same Action API. AI rivals (companies + cities) can be driven by a **local LLM** with tools (one model, many minds). Target: RTX 3050-class PCs.
+**Now:** Setup screen (AI companies, cities, map size). Cities own all plots at start; companies buy land via direct proposals. Edge roads + combine flags. Day turns, market, text saves.
 
 ## Docs
 
 - [docs/DESIGN.md](docs/DESIGN.md)
-- [docs/LLM.md](docs/LLM.md) — enable Ollama / tool bridge
+- [docs/CLASSES.md](docs/CLASSES.md)
+- [data/README.md](data/README.md)
+- [docs/LLM.md](docs/LLM.md)
 
 ## Run (dev)
 
@@ -18,7 +20,7 @@ pip install -r requirements.txt
 PYTHONPATH=src python -m company_sim --no-browser
 ```
 
-Open http://127.0.0.1:8765/
+Open http://127.0.0.1:8765/ — choose companies / cities / map size, then Start.
 
 ### Optional local LLM
 
@@ -28,17 +30,21 @@ export COMPANY_SIM_LLM_MODEL=qwen2.5:3b-instruct
 PYTHONPATH=src python -m company_sim
 ```
 
-Without LLM env vars, AI uses heuristics (game still runs).
-
 ### What works now
 
-- Actor base class → Company / City
-- Real-time tick + pause; pre-generated map; road-access invariant
-- Player: buy / build / road / merge
-- LLM tools → same Action API as the UI (Ollama-compatible)
+- Setup: AI company count, city count, plots-per-side; files created on start
+- Cities own all territory plots; companies start with none
+- Edge roads (N/E/S/W on owned plots); combine flags (no road between)
+- Plot buy/sell as direct proposals with accept/reject
+- Goods propose_sell / propose_buy with accept/reject
+- Market (companies only) + city government contracts
+- Day advances when all companies have acted
+- Text saves under `saves/` for LLM context
 
 ### Controls
 
-- Click plot → Buy / Build / Build road
-- Two adjacent owned plots → Merge with last
-- Pause / Resume
+- Propose buy/sell plot → Accept / Reject proposals
+- Build / Produce / Road (pick side) / Combine
+- Market: Buy 1 iron_ore / Sell 1 steel
+- Mail: pick contact → send message
+- Pass day / Pause

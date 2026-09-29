@@ -1,4 +1,11 @@
-"""Shared economic actors: City and Company share the same core behavior."""
+"""Shared economic actors: City and Company share the same core behavior.
+
+Agent fields (your list + gaps we need):
+  id, cash, inventory, plots (owned via world)
+  + name, kind, acted_this_day (day scheduling)
+  Company also: is_player
+  City also: center, population, territory
+"""
 
 from __future__ import annotations
 
@@ -23,10 +30,17 @@ class Actor:
     name: str
     cash: int = 1000
     inventory: Inventory = field(default_factory=Inventory)
+    acted_this_day: bool = False
 
     @property
     def kind(self) -> ActorKind:
         raise NotImplementedError
+
+    def mark_acted(self) -> None:
+        self.acted_this_day = True
+
+    def reset_day(self) -> None:
+        self.acted_this_day = False
 
     def to_public_dict(self) -> dict:
         return {
@@ -35,18 +49,30 @@ class Actor:
             "kind": self.kind,
             "cash": self.cash,
             "inventory": self.inventory.as_dict(),
+            "acted_this_day": self.acted_this_day,
         }
 
 
 @dataclass
 class Company(Actor):
     is_player: bool = False
+    # Engine-scripted startup firms (not LLM rivals)
+    is_small: bool = False
+    home_city_id: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.inventory, dict):
             self.inventory = Inventory(self.inventory)
         if not self.inventory.quantities:
-            self.inventory = Inventory({"materials": 20, "goods": 0})
+            self.inventory = Inventory(
+                {
+                    "iron_ore": 20,
+                    "coal": 20,
+                    "energy": 20,
+                    "steel": 0,
+                    "construction_materials": 50,
+                }
+            )
 
     @property
     def kind(self) -> ActorKind:
@@ -55,6 +81,8 @@ class Company(Actor):
     def to_public_dict(self) -> dict:
         data = super().to_public_dict()
         data["is_player"] = self.is_player
+        data["is_small"] = self.is_small
+        data["home_city_id"] = self.home_city_id
         return data
 
 
@@ -74,7 +102,15 @@ class City(Actor):
         if isinstance(self.inventory, dict):
             self.inventory = Inventory(self.inventory)
         if not self.inventory.quantities:
-            self.inventory = Inventory({"materials": 20, "goods": 0})
+            self.inventory = Inventory(
+                {
+                    "iron_ore": 20,
+                    "coal": 20,
+                    "energy": 20,
+                    "steel": 0,
+                    "construction_materials": 50,
+                }
+            )
 
     @property
     def kind(self) -> ActorKind:
