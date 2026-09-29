@@ -61,8 +61,8 @@ function terrainArt(plotType) {
 }
 
 function roadArt(mask) {
-  // v=edge: asphalt on plot borders only (bust old center-road SVG cache)
-  return `/static/assets/roads/mask_${mask | 0}.svg?v=edge2`;
+  // Kept for optional overlays; map drawing uses drawRoadEdges (canvas).
+  return `/static/assets/roads/mask_${mask | 0}.svg?v=edge3`;
 }
 
 function roadMaskFromPlot(plot) {
@@ -73,6 +73,51 @@ function roadMaskFromPlot(plot) {
   if (plot.roads.S) m |= 4;
   if (plot.roads.W) m |= 8;
   return m;
+}
+
+/** Paint asphalt flush on the plot's outer edges — never through the tile center. */
+function drawRoadEdges(px, py, size, roads) {
+  if (!roads) return;
+  // Strip thickness stays on the border (~22% of cell, min 2px).
+  const t = Math.max(2, Math.round(size * 0.22));
+  const asphalt = "#3a3f46";
+  const stripe = "rgba(244,241,222,0.9)";
+  const line = Math.max(1, Math.round(t * 0.18));
+
+  ctx.fillStyle = asphalt;
+  if (roads.N) {
+    ctx.fillRect(px, py, size, t);
+    ctx.fillStyle = stripe;
+    ctx.fillRect(px, py + Math.max(1, Math.floor(t * 0.25)), size, line);
+    ctx.fillRect(px, py + t - line - 1, size, line);
+    ctx.fillStyle = asphalt;
+  }
+  if (roads.S) {
+    ctx.fillRect(px, py + size - t, size, t);
+    ctx.fillStyle = stripe;
+    ctx.fillRect(px, py + size - t + 1, size, line);
+    ctx.fillRect(px, py + size - line - 1, size, line);
+    ctx.fillStyle = asphalt;
+  }
+  if (roads.W) {
+    ctx.fillRect(px, py, t, size);
+    ctx.fillStyle = stripe;
+    ctx.fillRect(px + Math.max(1, Math.floor(t * 0.25)), py, line, size);
+    ctx.fillRect(px + t - line - 1, py, line, size);
+    ctx.fillStyle = asphalt;
+  }
+  if (roads.E) {
+    ctx.fillRect(px + size - t, py, t, size);
+    ctx.fillStyle = stripe;
+    ctx.fillRect(px + size - t + 1, py, line, size);
+    ctx.fillRect(px + size - line - 1, py, line, size);
+    ctx.fillStyle = asphalt;
+  }
+  // Solid corner caps where two edge strips meet
+  if (roads.N && roads.W) ctx.fillRect(px, py, t, t);
+  if (roads.N && roads.E) ctx.fillRect(px + size - t, py, t, t);
+  if (roads.S && roads.W) ctx.fillRect(px, py + size - t, t, t);
+  if (roads.S && roads.E) ctx.fillRect(px + size - t, py + size - t, t, t);
 }
 
 function renderIconList(el, entries, emptyText) {
@@ -320,11 +365,11 @@ function draw() {
       }
     }
 
-    // Roads after buildings so edge asphalt stays visible on building plots
-    const mask = t.road_mask != null ? t.road_mask : roadMaskFromPlot(t.plot);
-    if (mask) {
-      const roadImg = loadArt(roadArt(mask));
-      drawImageFit(roadImg, px, py, cellSize, cellSize);
+    // Roads after buildings so edge asphalt stays visible on building plots.
+    // Canvas edge strips — never SVG center-junction art.
+    const roads = t.plot.roads || null;
+    if (roads && (roads.N || roads.E || roads.S || roads.W)) {
+      drawRoadEdges(px, py, cellSize, roads);
     }
   }
 
