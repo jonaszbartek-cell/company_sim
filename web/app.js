@@ -61,7 +61,8 @@ function terrainArt(plotType) {
 }
 
 function roadArt(mask) {
-  return `/static/assets/roads/mask_${mask | 0}.svg`;
+  // v=edge: asphalt on plot borders only (bust old center-road SVG cache)
+  return `/static/assets/roads/mask_${mask | 0}.svg?v=edge2`;
 }
 
 function roadMaskFromPlot(plot) {
