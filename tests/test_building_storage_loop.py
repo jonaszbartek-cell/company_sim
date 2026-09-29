@@ -78,18 +78,24 @@ def _foundry_loop(w: World, company_id: str) -> dict:
     # Buy inputs from seeded market @1
     for item_id in ("iron_ore", "coal", "energy"):
         before = company.inventory.get(item_id)
-        buy = w.buy_from_market("company", company_id, item_id, 1)
+        buy = w.buy_from_market("company", company_id, item_id, 10)
         assert buy.ok, buy.message
-        assert company.inventory.get(item_id) == before + 1
+        assert company.inventory.get(item_id) == before + 10
 
     for item_id in ("iron_ore", "coal", "energy"):
-        dep = w.deposit_to_building("company", company_id, x, y, item_id, 1)
+        dep = w.deposit_to_building("company", company_id, x, y, item_id, 10)
         assert dep.ok, dep.message
 
     steel_before_inv = company.inventory.get("steel")
     prod = w.produce("company", company_id, x, y)
     assert prod.ok, prod.message
-    assert tile.plot.building.storage.get("steel") >= 1
+    assert tile.plot.building.status == "working"
+    for _ in range(3):
+        for c in w.iter_companies():
+            c.acted_this_day = False
+            c.mark_acted()
+        w._maybe_advance_day()
+    assert tile.plot.building.storage.get("steel") >= 10
     assert company.inventory.get("steel") == steel_before_inv  # still in building
 
     out_qty = tile.plot.building.storage.get("steel")
@@ -139,7 +145,8 @@ def test_agents_can_read_full_catalogs():
         b = ex.execute("get_catalog", {"section": "buildings"})
         assert b["ok"] and len(b["data"]["buildings"]) >= 13
         m = ex.execute("get_catalog", {"section": "methods", "id": "make_steel"})
-        assert m["ok"] and m["data"]["inputs"]["iron_ore"] == 1
+        assert m["ok"] and m["data"]["inputs"]["iron_ore"] == 10
+        assert m["data"]["duration_sec"] == 3
 
 
 def test_destroy_building_refunds_ten_percent_floored():
@@ -225,16 +232,21 @@ def test_full_loop_agent_via_tools():
         )["ok"]
 
         for item_id in ("iron_ore", "coal", "energy"):
-            assert ex.execute("buy_from_market", {"item_id": item_id, "quantity": 1})["ok"]
+            assert ex.execute("buy_from_market", {"item_id": item_id, "quantity": 10})["ok"]
             assert ex.execute(
                 "deposit_to_building",
-                {"x": tile.x, "y": tile.y, "item_id": item_id, "quantity": 1},
+                {"x": tile.x, "y": tile.y, "item_id": item_id, "quantity": 10},
             )["ok"]
 
         prod = ex.execute("produce", {"x": tile.x, "y": tile.y})
         assert prod["ok"], prod
+        for _ in range(3):
+            for c in w.iter_companies():
+                c.acted_this_day = False
+                c.mark_acted()
+            w._maybe_advance_day()
         steel_qty = tile.plot.building.storage.get("steel")
-        assert steel_qty >= 1
+        assert steel_qty >= 10
         assert ex.execute(
             "withdraw_from_building",
             {"x": tile.x, "y": tile.y, "item_id": "steel", "quantity": steel_qty},
@@ -255,7 +267,7 @@ def test_produce_without_building_storage_fails():
         player.inventory.set("energy", 5)
         w.build_building("company", "player", tile.x, tile.y, "foundry")
         w.set_production_method("company", "player", tile.x, tile.y, "make_steel")
-        with pytest.raises(ActionError, match="building storage"):
+        with pytest.raises(ActionError, match="Missing inputs across owned buildings"):
             w.produce("company", "player", tile.x, tile.y)
 
 

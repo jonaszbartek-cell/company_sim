@@ -269,7 +269,7 @@ def _lowest_sell_price(world: World, item_id: str, exclude_owner_id: str) -> int
 
 
 def run_small_company_turn(world: World, company: Company) -> str:
-    """Buy inputs → deposit → produce → withdraw → sell at lowest market price."""
+    """Buy inputs → deposit into owned buildings → start/keep production → sell outputs."""
     if not company.is_small:
         return f"{company.name}: not a small company"
     tile = _company_building_tile(world, company.id)
@@ -289,9 +289,11 @@ def run_small_company_turn(world: World, company: Company) -> str:
     notes: list[str] = []
     try:
         world.ensure_building_storage(b)
-        # Buy + deposit missing inputs
+        # Buy + deposit missing inputs so produce can pull from nearest owned buildings
         for item_id, need in method.inputs.items():
-            have = b.storage.get(item_id)
+            have = 0
+            for _bx, _by, ob in world._owned_buildings("company", company.id):  # type: ignore[attr-defined]
+                have += ob.storage.get(item_id)
             missing = max(0, int(need) - have)
             if missing <= 0:
                 continue
@@ -313,14 +315,17 @@ def run_small_company_turn(world: World, company: Company) -> str:
                 except Exception:
                     pass
 
-        # Produce if inputs present
-        try:
-            world.produce("company", company.id, x, y)
-            notes.append("produced")
-        except Exception as exc:
-            notes.append(f"produce-skip ({exc})")
+        # Start a batch if idle (multi-day; outputs appear after day rolls)
+        if b.status != "working":
+            try:
+                world.produce("company", company.id, x, y)
+                notes.append("started-production")
+            except Exception as exc:
+                notes.append(f"produce-skip ({exc})")
+        else:
+            notes.append("producing")
 
-        # Withdraw all outputs present in storage and sell
+        # Withdraw finished outputs present in storage and sell
         for item_id in list(method.outputs.keys()):
             qty = b.storage.get(item_id)
             if qty <= 0:

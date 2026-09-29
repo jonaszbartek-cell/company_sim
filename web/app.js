@@ -501,6 +501,7 @@ function refreshPanels() {
   hudTime.textContent =
     `day ${state.day}` +
     (state.paused ? " PAUSED" : "") +
+    (state.pause_requested && !state.paused ? " (pausing at end of day)" : "") +
     (acted ? " (you acted)" : "") +
     (state.current_turn ? ` | AI:${state.current_turn}` : "");
   const player = state.companies.find((c) => c.id === state.player_company_id);
@@ -558,7 +559,11 @@ function refreshPanels() {
   refreshMailContacts();
   refreshMailLog();
   refreshLlmDebugPanel();
-  btnPause.textContent = state.paused ? "Resume" : "Pause";
+  if (state.pause_requested && !state.paused) {
+    btnPause.textContent = "Pausing…";
+  } else {
+    btnPause.textContent = state.paused ? "Resume" : "Pause";
+  }
 
   if (!selected) {
     selectedEl.textContent = "Click a plot";
@@ -668,7 +673,8 @@ canvas.addEventListener("click", (ev) => {
 });
 
 btnPause.addEventListener("click", async () => {
-  const paused = !(state && state.paused);
+  // While a pause is pending for end-of-day, clicking again cancels it (resume).
+  const paused = !(state && (state.paused || state.pause_requested));
   await api("/api/pause", { paused });
 });
 

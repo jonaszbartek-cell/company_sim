@@ -89,7 +89,9 @@ class Building:
     # True for Mine/Rig after construct — set_production_method is rejected
     production_method_locked: bool = False
     status: BuildingStatus = "idle"
-    progress: float = 0.0  # 0..1 toward next batch (legacy / multi-day)
+    # Days elapsed in the current production batch (0..duration_days)
+    production_days_elapsed: int = 0
+    progress: float = 0.0  # 0..1 toward next batch (= elapsed / duration)
     storage: Inventory = field(default_factory=Inventory)
     # Materialized at build / reconcile: item_id -> capacity
     storage_capacity: dict[str, int] = field(default_factory=dict)
@@ -156,6 +158,7 @@ class Building:
             "production_method_id": self.production_method_id,
             "production_method_locked": bool(self.production_method_locked),
             "status": self.status,
+            "production_days_elapsed": int(self.production_days_elapsed),
             "progress": self.progress,
             "storage": self.storage.as_dict(),
             "storage_capacity": dict(self.storage_capacity),

@@ -112,16 +112,22 @@ def test_day_loop_pause_pass_and_advance():
         w = _world(Path(td), size=4, cities=1, ai=1)
         assert w.day == 1
         w.set_paused(True)
-        assert w.paused is True
+        assert w.pause_requested is True
+        assert w.paused is False  # continues until day ends
         w.tick(1.0)
-        assert w.tick_index == 0  # paused
-        w.set_paused(False)
-        w.tick(0.25)
-        assert w.tick_index == 1
+        assert w.tick_index == 1  # still ticking while pause pending
         w.pass_turn("company", "player")
         assert w.day == 1
+        assert w.paused is False
         w.pass_turn("company", "ai_1")
         assert w.day == 2
+        assert w.paused is True  # day completed → now paused
+        prev = w.tick_index
+        w.tick(1.0)
+        assert w.tick_index == prev
+        w.set_paused(False)
+        w.tick(0.25)
+        assert w.tick_index == prev + 1
 
 
 def test_land_build_produce_road_combine():
@@ -132,9 +138,9 @@ def test_land_build_produce_road_combine():
         for x, y in ((1, 1), (2, 1)):
             w.grid.get(x, y).plot.claim("company", "player")
         player.inventory.set("steel", 5)
-        player.inventory.set("iron_ore", 5)
-        player.inventory.set("coal", 5)
-        player.inventory.set("energy", 5)
+        player.inventory.set("iron_ore", 15)
+        player.inventory.set("coal", 15)
+        player.inventory.set("energy", 15)
 
         r = w.build_building("company", "player", 1, 1, "foundry")
         assert r.ok
@@ -143,14 +149,21 @@ def test_land_build_produce_road_combine():
         assert r.ok
         player.acted_this_day = False
         for item_id in ("iron_ore", "coal", "energy"):
-            w.deposit_to_building("company", "player", 1, 1, item_id, 1)
+            w.deposit_to_building("company", "player", 1, 1, item_id, 10)
             player.acted_this_day = False
         steel_inv_before = player.inventory.get("steel")
         r = w.produce("company", "player", 1, 1)
         assert r.ok
         bld = w.grid.get(1, 1).plot.building
         assert bld is not None
-        assert bld.storage.get("steel") >= 1
+        assert bld.status == "working"
+        # Solo player: produce rolls the day once; finish remaining production days
+        for _ in range(2):
+            for c in w.iter_companies():
+                c.acted_this_day = False
+                c.mark_acted()
+            w._maybe_advance_day()
+        assert bld.storage.get("steel") >= 10
         assert player.inventory.get("steel") == steel_inv_before  # output stays in building
         player.acted_this_day = False
         w.withdraw_from_building("company", "player", 1, 1, "steel", 1)
@@ -366,9 +379,9 @@ def test_all_llm_tools_are_registered_and_dispatch():
         w.grid.get(0, 0).plot.claim("company", "ai_1")
         w.grid.get(1, 0).plot.claim("company", "ai_1")
         company.inventory.set("steel", 5)
-        company.inventory.set("iron_ore", 5)
-        company.inventory.set("coal", 5)
-        company.inventory.set("energy", 5)
+        company.inventory.set("iron_ore", 15)
+        company.inventory.set("coal", 15)
+        company.inventory.set("energy", 15)
         ex = ToolExecutor(w, company)
 
         assert ex.execute("get_status", {})["ok"]
@@ -386,16 +399,22 @@ def test_all_llm_tools_are_registered_and_dispatch():
         for item_id in ("iron_ore", "coal", "energy"):
             assert ex.execute(
                 "deposit_to_building",
-                {"x": 0, "y": 0, "item_id": item_id, "quantity": 1},
+                {"x": 0, "y": 0, "item_id": item_id, "quantity": 10},
             )["ok"]
             company.acted_this_day = False
         assert ex.execute("produce", {"x": 0, "y": 0})["ok"]
+        # Finish multi-day batch
+        for _ in range(3):
+            for c in w.iter_companies():
+                c.acted_this_day = False
+                c.mark_acted()
+            w._maybe_advance_day()
         company.acted_this_day = False
         steel_qty = w.grid.get(0, 0).plot.building.storage.get("steel")
-        assert steel_qty >= 1
+        assert steel_qty >= 10
         assert ex.execute(
             "withdraw_from_building",
-            {"x": 0, "y": 0, "item_id": "steel", "quantity": steel_qty},
+            {"x": 0, "y": 0, "item_id": "steel", "quantity": min(steel_qty, 5)},
         )["ok"]
         company.acted_this_day = False
         # Road on S so E edge stays free for combine with (1,0)
@@ -532,9 +551,9 @@ def test_player_http_api_setup_and_core_routes():
     world.grid.get(1, 1).plot.claim("company", "player")
     world.grid.get(2, 1).plot.claim("company", "player")
     world.companies["player"].inventory.set("steel", 5)
-    world.companies["player"].inventory.set("iron_ore", 5)
-    world.companies["player"].inventory.set("coal", 5)
-    world.companies["player"].inventory.set("energy", 5)
+    world.companies["player"].inventory.set("iron_ore", 15)
+    world.companies["player"].inventory.set("coal", 15)
+    world.companies["player"].inventory.set("energy", 15)
 
     assert client.post(
         "/api/player/build", json={"x": 1, "y": 1, "building_id": "foundry"}
@@ -548,10 +567,15 @@ def test_player_http_api_setup_and_core_routes():
     for item_id in ("iron_ore", "coal", "energy"):
         assert client.post(
             "/api/player/deposit_to_building",
-            json={"x": 1, "y": 1, "item_id": item_id, "quantity": 1},
+            json={"x": 1, "y": 1, "item_id": item_id, "quantity": 10},
         ).json()["ok"]
         world.companies["player"].acted_this_day = False
     assert client.post("/api/player/produce", json={"x": 1, "y": 1}).json()["ok"]
+    for _ in range(3):
+        for c in world.iter_companies():
+            c.acted_this_day = False
+            c.mark_acted()
+        world._maybe_advance_day()
     world.companies["player"].acted_this_day = False
     assert client.post(
         "/api/player/withdraw_from_building",

@@ -249,11 +249,15 @@ def test_pause_pass_state_roundtrip(client):
     _start(c, ai_companies=0)
     assert c.post("/api/pause", json={"paused": True}).json()["ok"] is True
     st = c.get("/api/state").json()
-    assert st["state"]["paused"] is True
-    assert c.post("/api/pause", json={"paused": False}).json()["ok"] is True
+    # Mid-day: pause is pending until the day completes
+    assert st["state"]["pause_requested"] is True
+    assert st["state"]["paused"] is False
     assert c.post("/api/player/pass").json()["ok"] is True
     st2 = c.get("/api/state").json()
     assert st2["state"]["day"] >= 2
+    assert st2["state"]["paused"] is True
+    assert c.post("/api/pause", json={"paused": False}).json()["ok"] is True
+    assert c.get("/api/state").json()["state"]["paused"] is False
 
 
 def test_build_produce_road_merge_http_without_ownership_fails(client):

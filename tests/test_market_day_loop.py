@@ -77,21 +77,27 @@ def test_produce_steel():
         t = owned[0]
         w.build_building("company", "player", t.x, t.y, "foundry")
         player.inventory = player.inventory.__class__(
-            {"iron_ore": 2, "coal": 2, "energy": 2, "steel": 0, "construction_materials": 20}
+            {"iron_ore": 20, "coal": 20, "energy": 20, "steel": 0, "construction_materials": 20}
         )
         # build already marked acted; force another produce on same day by resetting flag
         player.acted_this_day = False
         for item_id in ("iron_ore", "coal", "energy"):
-            w.deposit_to_building("company", "player", t.x, t.y, item_id, 1)
+            w.deposit_to_building("company", "player", t.x, t.y, item_id, 10)
             player.acted_this_day = False
         r = w.produce("company", "player", t.x, t.y)
         assert r.ok
-        assert t.plot.building.storage.get("steel") == 1
-        assert player.inventory.get("steel") == 0  # output in building storage
         assert t.plot.building.status == "working"
+        assert t.plot.building.storage.get("steel") == 0  # outputs after 3 days
+        for _ in range(3):
+            for c in w.iter_companies():
+                c.acted_this_day = False
+                c.mark_acted()
+            w._maybe_advance_day()
+        assert t.plot.building.storage.get("steel") == 10
+        assert player.inventory.get("steel") == 0  # output in building storage
         player.acted_this_day = False
-        w.withdraw_from_building("company", "player", t.x, t.y, "steel", 1)
-        assert player.inventory.get("steel") == 1
+        w.withdraw_from_building("company", "player", t.x, t.y, "steel", 10)
+        assert player.inventory.get("steel") == 10
 
 
 def test_persistence_files():

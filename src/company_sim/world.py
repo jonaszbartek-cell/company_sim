@@ -74,15 +74,21 @@ class WorldConfig:
 
 def _starter_inventory() -> Inventory:
     # Starter economy TBD later — temporary placeholder so buildings/recipes can run.
+    # Quantities sized for placeholder recipes (10 goods per batch).
     return Inventory(
         {
-            "iron_ore": 20,
-            "coal": 20,
-            "energy": 20,
+            "iron_ore": 30,
+            "coal": 30,
+            "energy": 30,
             "steel": 0,
             "construction_materials": 50,
         }
     )
+
+
+def _method_duration_days(method) -> int:
+    """Production duration in game days (duration_sec in YAML is the day count)."""
+    return max(1, int(round(float(method.duration_sec))))
 
 
 @dataclass
@@ -99,6 +105,8 @@ class World:
     day: int = 1
     time_sec: float = 0.0
     paused: bool = False
+    # User asked to stop — keep simulating until the current day completes, then pause.
+    pause_requested: bool = False
     tick_index: int = 0
     turn_index: int = 0
     persistence: GamePersistence = field(default_factory=GamePersistence)
@@ -108,6 +116,8 @@ class World:
     # When True, note_actor_action still marks acted but does not roll the day
     # (used by multi-step small-company engine turns).
     _suppress_day_advance: bool = False
+    # Production overflow / other engine notices (also mailed to the owner when possible)
+    warnings: list[dict] = field(default_factory=list)
 
     @property
     def items(self):
@@ -453,12 +463,294 @@ class World:
             self.day += 1
             for actor in self.iter_all_actors():
                 actor.reset_day()
-            self._idle_all_buildings()
+            self._advance_all_production()
+            if self.pause_requested:
+                self.paused = True
+                self.pause_requested = False
 
-    def _idle_all_buildings(self) -> None:
+    def _iter_buildings(self) -> list[tuple[int, int, Building]]:
+        out: list[tuple[int, int, Building]] = []
+        seen: set[str] = set()
         for t in self.grid.tiles:
-            if t.plot and t.plot.building and t.plot.building.status == "working":
-                t.plot.building.status = "idle"
+            if not t.plot or not t.plot.building:
+                continue
+            b = t.plot.building
+            if b.id in seen:
+                continue
+            seen.add(b.id)
+            ax = b.anchor_x if b.anchor_x is not None else t.x
+            ay = b.anchor_y if b.anchor_y is not None else t.y
+            out.append((ax, ay, b))
+        return out
+
+    def _owned_buildings(
+        self, owner_kind: str, owner_id: str
+    ) -> list[tuple[int, int, Building]]:
+        return [
+            (x, y, b)
+            for x, y, b in self._iter_buildings()
+            if b.owner_kind == owner_kind and b.owner_id == owner_id
+        ]
+
+    def _manhattan(self, x1: int, y1: int, x2: int, y2: int) -> int:
+        return abs(x1 - x2) + abs(y1 - y2)
+
+    def _push_warning(
+        self,
+        *,
+        owner_kind: str,
+        owner_id: str,
+        message: str,
+        data: dict | None = None,
+    ) -> None:
+        entry = {
+            "day": self.day,
+            "owner_kind": owner_kind,
+            "owner_id": owner_id,
+            "message": message,
+            "data": data or {},
+        }
+        self.warnings.append(entry)
+        # Cap growth for long runs
+        if len(self.warnings) > 200:
+            self.warnings = self.warnings[-200:]
+        # Best-effort mailbox notice to the owner (from first city, or skip)
+        try:
+            if self.mailboxes is not None and self.grid.cities:
+                city_id = next(iter(self.grid.cities))
+                self.mail().send(
+                    from_kind="city",
+                    from_id=city_id,
+                    to_kind=owner_kind,
+                    to_id=owner_id,
+                    body=f"[production] {message}",
+                    day=self.day,
+                )
+        except Exception:
+            pass
+
+    def _total_stock(
+        self, buildings: list[tuple[int, int, Building]], item_id: str
+    ) -> int:
+        total = 0
+        for _x, _y, b in buildings:
+            self.ensure_building_storage(b)
+            total += b.storage.get(item_id)
+        return total
+
+    def _pull_inputs_from_nearest(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        origin: tuple[int, int],
+        inputs: dict[str, int],
+    ) -> dict[str, list[dict]]:
+        """Consume inputs from nearest owned buildings (split across buildings OK).
+
+        All-or-nothing: raises ActionError if total stock is insufficient.
+        Returns a pull plan for messaging: item -> [{x,y,qty}, ...]
+        """
+        if not inputs:
+            return {}
+        owned = self._owned_buildings(owner_kind, owner_id)
+        ox, oy = origin
+        for item_id, need in inputs.items():
+            if self._total_stock(owned, item_id) < need:
+                have = self._total_stock(owned, item_id)
+                raise ActionError(
+                    f"Missing inputs across owned buildings: need {need}x {item_id}, have {have}"
+                )
+
+        plan: dict[str, list[dict]] = {}
+        for item_id, need in inputs.items():
+            remaining = int(need)
+            ranked = sorted(
+                owned,
+                key=lambda row: (self._manhattan(ox, oy, row[0], row[1]), row[0], row[1]),
+            )
+            taken: list[dict] = []
+            for x, y, b in ranked:
+                if remaining <= 0:
+                    break
+                have = b.storage.get(item_id)
+                if have <= 0:
+                    continue
+                take = min(have, remaining)
+                b.storage.add(item_id, -take)
+                remaining -= take
+                taken.append({"x": x, "y": y, "qty": take, "building_id": b.id})
+            plan[item_id] = taken
+        return plan
+
+    def _place_outputs_nearest(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        origin: tuple[int, int],
+        primary: Building,
+        outputs: dict[str, int],
+    ) -> tuple[dict[str, int], dict[str, int]]:
+        """Place outputs into primary building, then nearest owned buildings with room.
+
+        Returns (placed, destroyed) quantity maps.
+        """
+        placed: dict[str, int] = {}
+        destroyed: dict[str, int] = {}
+        if not outputs:
+            return placed, destroyed
+
+        ox, oy = origin
+        owned = self._owned_buildings(owner_kind, owner_id)
+        # Prefer primary first, then others by distance
+        ordered: list[tuple[int, int, Building]] = []
+        seen: set[str] = set()
+        for x, y, b in owned:
+            if b.id == primary.id:
+                ordered.append((ox, oy, primary))
+                seen.add(b.id)
+                break
+        for x, y, b in sorted(
+            owned,
+            key=lambda row: (self._manhattan(ox, oy, row[0], row[1]), row[0], row[1]),
+        ):
+            if b.id in seen:
+                continue
+            ordered.append((x, y, b))
+            seen.add(b.id)
+
+        for item_id, qty in outputs.items():
+            remaining = int(qty)
+            for _x, _y, b in ordered:
+                if remaining <= 0:
+                    break
+                self.ensure_building_storage(b)
+                cap = b.storage_capacity.get(item_id)
+                if cap is None:
+                    continue
+                room = cap - b.storage.get(item_id)
+                if room <= 0:
+                    continue
+                put = min(room, remaining)
+                b.storage.add(item_id, put)
+                remaining -= put
+                placed[item_id] = placed.get(item_id, 0) + put
+            if remaining > 0:
+                destroyed[item_id] = destroyed.get(item_id, 0) + remaining
+        return placed, destroyed
+
+    def _begin_production(
+        self,
+        owner_kind: str,
+        owner_id: str,
+        x: int,
+        y: int,
+        building: Building,
+        *,
+        raise_errors: bool = True,
+    ) -> ActionResult | None:
+        """Pull inputs and start a production batch. Returns None on soft failure when raise_errors=False."""
+        if building.status == "working":
+            if raise_errors:
+                raise ActionError("Building is already producing")
+            return None
+        if not building.production_method_id:
+            if raise_errors:
+                raise ActionError("No production method selected")
+            return None
+        try:
+            method = self.production.get(building.production_method_id)
+        except KeyError as exc:
+            if raise_errors:
+                raise ActionError(f"Unknown method: {building.production_method_id}") from exc
+            return None
+        if method.building_id != building.building_id:
+            if raise_errors:
+                raise ActionError("Method does not match building")
+            return None
+        self.ensure_building_storage(building)
+        try:
+            plan = self._pull_inputs_from_nearest(
+                owner_kind, owner_id, (x, y), method.inputs
+            )
+        except ActionError:
+            if raise_errors:
+                raise
+            return None
+        building.status = "working"
+        building.production_days_elapsed = 0
+        building.progress = 0.0
+        duration = _method_duration_days(method)
+        return ActionResult(
+            True,
+            f"Started {method.id} at ({x},{y}) — {duration} days",
+            {
+                "inputs": method.inputs,
+                "outputs": method.outputs,
+                "duration_days": duration,
+                "pulled_from": plan,
+                "status": building.status,
+                "progress": building.progress,
+            },
+        )
+
+    def _complete_production_batch(
+        self, x: int, y: int, building: Building
+    ) -> None:
+        method = self.production.get(building.production_method_id or "")
+        placed, destroyed = self._place_outputs_nearest(
+            building.owner_kind,
+            building.owner_id,
+            (x, y),
+            building,
+            method.outputs,
+        )
+        if destroyed:
+            self._push_warning(
+                owner_kind=building.owner_kind,
+                owner_id=building.owner_id,
+                message=(
+                    f"Production overflow at ({x},{y}) {building.building_id}/"
+                    f"{building.production_method_id}: destroyed {destroyed} "
+                    f"(no storage room)"
+                ),
+                data={
+                    "x": x,
+                    "y": y,
+                    "building_id": building.id,
+                    "destroyed": destroyed,
+                    "placed": placed,
+                },
+            )
+        building.status = "idle"
+        building.production_days_elapsed = 0
+        building.progress = 0.0
+        # Auto-restart the same method when possible
+        self._begin_production(
+            building.owner_kind,
+            building.owner_id,
+            x,
+            y,
+            building,
+            raise_errors=False,
+        )
+
+    def _advance_all_production(self) -> None:
+        """Called once per day roll: tick working batches; idle buildings stay idle."""
+        for x, y, b in self._iter_buildings():
+            if b.status != "working" or not b.production_method_id:
+                continue
+            try:
+                method = self.production.get(b.production_method_id)
+            except KeyError:
+                b.status = "idle"
+                b.production_days_elapsed = 0
+                b.progress = 0.0
+                continue
+            duration = _method_duration_days(method)
+            b.production_days_elapsed = int(b.production_days_elapsed) + 1
+            b.progress = min(1.0, b.production_days_elapsed / float(duration))
+            if b.production_days_elapsed >= duration:
+                self._complete_production_batch(x, y, b)
 
     def advance_ai_turn(self) -> None:
         queue = self.turn_queue_ids()
@@ -584,6 +876,8 @@ class World:
                 f"{b.building_id} production method is locked "
                 f"({b.production_method_id}) and cannot be changed"
             )
+        if b.status == "working":
+            raise ActionError("Cannot change production method while producing")
         try:
             method = self.production.get(method_id)
         except KeyError as exc:
@@ -704,60 +998,23 @@ class World:
         )
 
     def produce(self, owner_kind: str, owner_id: str, x: int, y: int) -> ActionResult:
-        actor = self.get_actor(owner_kind, owner_id)
+        """Start a production batch: pull inputs from nearest owned buildings, then run for N days.
+
+        Outputs are deposited when the batch completes on a day roll (see `_advance_all_production`).
+        Finished batches auto-restart when inputs are available.
+        """
         tile = self.grid.get(x, y)
         if not tile.plot or not tile.plot.building:
             raise ActionError("No building there")
         if not tile.plot.owned_by(owner_kind, owner_id):
             raise ActionError("You do not own this plot")
         b = tile.plot.building
-        if not b.production_method_id:
-            raise ActionError("No production method selected")
-        try:
-            method = self.production.get(b.production_method_id)
-        except KeyError as exc:
-            raise ActionError(f"Unknown method: {b.production_method_id}") from exc
-        if method.building_id != b.building_id:
-            raise ActionError("Method does not match building")
-        # Production runs through building storage (owned by plot owner)
-        self.ensure_building_storage(b)
-        if not b.storage.has(method.inputs):
-            raise ActionError(
-                f"Missing inputs in building storage: need {method.inputs}, "
-                f"have {b.storage.as_dict()}"
-            )
-        capacity = b.storage_capacity
-        bonus = self.grid.production_bonus_at(x, y)
-        batches = max(1, int(bonus))
-        # Check output room for all batches before consuming
-        for item_id, out_qty in method.outputs.items():
-            need = out_qty * batches
-            room = capacity.get(item_id, 0) - b.storage.get(item_id)
-            # After consuming inputs, room increases for input items that are also outputs
-            if item_id in method.inputs:
-                room += method.inputs[item_id]
-            if need > room:
-                raise ActionError(
-                    f"Not enough storage room for output {item_id} "
-                    f"(need {need}, room {room}, cap {capacity.get(item_id, 0)})"
-                )
-
-        b.status = "working"
-        b.storage.consume(method.inputs)
-        for _ in range(batches):
-            b.storage.produce(method.outputs)
+        ax = b.anchor_x if b.anchor_x is not None else x
+        ay = b.anchor_y if b.anchor_y is not None else y
+        result = self._begin_production(owner_kind, owner_id, ax, ay, b, raise_errors=True)
+        assert result is not None
         self.note_actor_action(owner_kind, owner_id)
-        return ActionResult(
-            True,
-            f"Produced via {method.id} at ({x},{y}) into building storage",
-            {
-                "inputs": method.inputs,
-                "outputs": method.outputs,
-                "bonus": bonus,
-                "batches": batches,
-                "storage": b.storage.as_dict(),
-            },
-        )
+        return result
 
     def build_road(self, actor_kind: str, actor_id: str, x: int, y: int, side: str) -> ActionResult:
         """Build a road on one side (N/E/S/W) of an owned plot — this plot only.
@@ -1651,8 +1908,40 @@ class World:
         return ActionResult(True, "government_contracts", self.gov_contracts.to_public_dict())
 
     def set_paused(self, paused: bool) -> ActionResult:
-        self.paused = paused
-        return ActionResult(True, "paused" if paused else "resumed")
+        """Pause at end of the current day; resume immediately when unpausing.
+
+        Requesting pause while a day is in progress keeps the sim running until
+        every company has acted and the day rolls — then `paused` becomes True.
+        """
+        if paused:
+            companies = self.iter_companies()
+            day_over = bool(companies) and all(c.acted_this_day for c in companies)
+            if day_over or not companies:
+                # Finish any pending day roll first if everyone already acted
+                if day_over and not self._suppress_day_advance:
+                    # Day may not have rolled yet if the last actor didn't trigger it
+                    self._maybe_advance_day()
+                self.pause_requested = False
+                self.paused = True
+                return ActionResult(
+                    True,
+                    "paused",
+                    {"paused": True, "pause_requested": False, "day": self.day},
+                )
+            self.pause_requested = True
+            self.paused = False
+            return ActionResult(
+                True,
+                "will pause at end of day",
+                {"paused": False, "pause_requested": True, "day": self.day},
+            )
+        self.pause_requested = False
+        self.paused = False
+        return ActionResult(
+            True,
+            "resumed",
+            {"paused": False, "pause_requested": False, "day": self.day},
+        )
 
     def pass_turn(self, owner_kind: str, owner_id: str) -> ActionResult:
         self.get_actor(owner_kind, owner_id)
@@ -1736,6 +2025,8 @@ class World:
             "time_sec": round(self.time_sec, 2),
             "tick_index": self.tick_index,
             "paused": self.paused,
+            "pause_requested": self.pause_requested,
+            "warnings": list(self.warnings[-50:]),
             "player_company_id": self.player_company_id,
             "current_turn": self.current_turn_token(),
             "config": {

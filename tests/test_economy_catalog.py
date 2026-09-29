@@ -61,15 +61,15 @@ def test_power_recipes_have_no_energy_input():
     for mid in ("coal_power", "gas_power", "oil_power"):
         m = c.production.get(mid)
         assert "energy" not in m.inputs
-        assert m.outputs == {"energy": 1}
+        assert m.outputs == {"energy": 10}
 
 
 def test_make_steel_uses_iron_ore():
     c = GameContent.load()
     m = c.production.get("make_steel")
-    assert m.inputs == {"iron_ore": 1, "coal": 1, "energy": 1}
-    assert m.outputs == {"steel": 1}
-    assert m.duration_sec == 1
+    assert m.inputs == {"iron_ore": 10, "coal": 10, "energy": 10}
+    assert m.outputs == {"steel": 10}
+    assert m.duration_sec == 3
 
 
 def test_build_foundry_consumes_construction_materials():

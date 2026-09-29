@@ -441,18 +441,23 @@ class AIScheduler:
             except Exception:
                 pass
 
-        # Produce if we have a foundry + inputs (via building storage)
+        # Produce if we have a building + inputs across owned building storage
         for t in owned:
             b = t.plot.building if t.plot else None
-            if not b or not b.production_method_id:
+            if not b or not b.production_method_id or b.status == "working":
                 continue
             try:
                 method = world.production.get(b.production_method_id)
             except KeyError:
                 continue
-            # Deposit missing inputs from company inventory into building storage
+            # Deposit missing inputs from company inventory into this building
+            owned_buildings = [
+                (ot.x, ot.y, ot.plot.building)
+                for ot in owned
+                if ot.plot and ot.plot.building
+            ]
             for item_id, need in method.inputs.items():
-                in_storage = b.storage.get(item_id)
+                in_storage = sum(ob.storage.get(item_id) for _x, _y, ob in owned_buildings)
                 short = need - in_storage
                 if short <= 0:
                     continue
@@ -467,14 +472,14 @@ class AIScheduler:
                     return
                 except Exception:
                     break
-            if b.storage.has(method.inputs):
-                try:
-                    world.produce("company", company.id, t.x, t.y)
-                    self.last_thought = f"{company.name}: produced {method.id}"
-                    return
-                except Exception as exc:  # noqa: BLE001
-                    self.last_thought = f"{company.name}: produce failed ({exc})"
-                    break
+            # Start multi-day batch when enough stock exists across owned buildings
+            try:
+                world.produce("company", company.id, t.x, t.y)
+                self.last_thought = f"{company.name}: started {method.id}"
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.last_thought = f"{company.name}: produce failed ({exc})"
+                continue
 
         # Withdraw finished goods from building storage into inventory
         for t in owned:

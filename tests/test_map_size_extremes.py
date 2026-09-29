@@ -69,9 +69,9 @@ def test_extremely_big_map_build_road_produce_merge():
         player.cash = 50_000
         player.inventory.set("construction_materials", 80)
         player.inventory.set("steel", 10)
-        player.inventory.set("iron_ore", 5)
-        player.inventory.set("coal", 5)
-        player.inventory.set("energy", 5)
+        player.inventory.set("iron_ore", 15)
+        player.inventory.set("coal", 15)
+        player.inventory.set("energy", 15)
 
         # Mid-map empty land (skip City Hall at territory center)
         x = y = None
@@ -94,10 +94,11 @@ def test_extremely_big_map_build_road_produce_merge():
         assert road.ok, road.message
         player.acted_this_day = False
         for item in ("iron_ore", "coal", "energy"):
-            w.deposit_to_building("company", "player", x, y, item, 1)
+            w.deposit_to_building("company", "player", x, y, item, 10)
             player.acted_this_day = False
         produced = w.produce("company", "player", x, y)
         assert produced.ok, produced.message
+        assert w.grid.get(x, y).plot.building.status == "working"
 
         # Expand footprint onto neighbor (still a rectangle)
         nx, ny = x + 1, y
