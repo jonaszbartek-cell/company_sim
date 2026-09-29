@@ -56,6 +56,9 @@ class Actor:
 @dataclass
 class Company(Actor):
     is_player: bool = False
+    # Engine-scripted startup firms (not LLM rivals)
+    is_small: bool = False
+    home_city_id: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.inventory, dict):
@@ -78,6 +81,8 @@ class Company(Actor):
     def to_public_dict(self) -> dict:
         data = super().to_public_dict()
         data["is_player"] = self.is_player
+        data["is_small"] = self.is_small
+        data["home_city_id"] = self.home_city_id
         return data
 
 
