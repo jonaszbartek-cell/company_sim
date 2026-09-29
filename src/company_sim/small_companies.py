@@ -50,6 +50,43 @@ def _candidate_plots_near_hall(
     return [(x, y) for _, _, x, y in ranked[:count]]
 
 
+def _candidate_plots_random(
+    world: World,
+    city_id: str,
+    hall: tuple[int, int],
+    count: int,
+    *,
+    rng: random.Random,
+    min_hall_dist: int = 3,
+) -> list[tuple[int, int]]:
+    """Empty city-owned plots chosen at random (not clustered around the hall).
+
+    Used by tests to stress road wiring when companies are scattered.
+    Prefers sites at least ``min_hall_dist`` from the hall when available.
+    """
+    far: list[tuple[int, int]] = []
+    near: list[tuple[int, int]] = []
+    for tile in world.grid.tiles:
+        plot = tile.plot
+        if not plot or not plot.owned_by("city", city_id):
+            continue
+        if plot.building is not None:
+            continue
+        dist = manhattan((tile.x, tile.y), hall)
+        if dist == 0:
+            continue
+        if dist >= min_hall_dist:
+            far.append((tile.x, tile.y))
+        else:
+            near.append((tile.x, tile.y))
+    rng.shuffle(far)
+    rng.shuffle(near)
+    picked = far[:count]
+    if len(picked) < count:
+        picked.extend(near[: count - len(picked)])
+    return picked
+
+
 def _pick_building_and_method(
     world: World, plot_type: PlotType, rng: random.Random
 ) -> tuple[str, str | None]:
@@ -97,8 +134,17 @@ def _place_free_building(
     return building
 
 
-def spawn_small_companies(world: World, *, rng: random.Random | None = None) -> list[Company]:
-    """Claim plots around each city hall, build random industry, return new companies."""
+def spawn_small_companies(
+    world: World,
+    *,
+    rng: random.Random | None = None,
+    random_sites: bool = False,
+) -> list[Company]:
+    """Claim plots around each city hall, build random industry, return new companies.
+
+    When ``random_sites`` is True, place companies on random city-owned plots
+    (not nearest-to-hall). Intended for stress tests of road wiring.
+    """
     per_city = int(world.config.small_companies_per_city)
     if per_city <= 0:
         return []
@@ -108,7 +154,10 @@ def spawn_small_companies(world: World, *, rng: random.Random | None = None) -> 
         hall = city_hall_coord(world, city.id)
         if hall is None:
             continue
-        sites = _candidate_plots_near_hall(world, city.id, hall, per_city)
+        if random_sites:
+            sites = _candidate_plots_random(world, city.id, hall, per_city, rng=rng)
+        else:
+            sites = _candidate_plots_near_hall(world, city.id, hall, per_city)
         for i, (x, y) in enumerate(sites):
             cid = f"small_{city.id}_{i + 1}"
             company = Company(
@@ -145,10 +194,15 @@ def wire_startup_roads(world: World) -> dict[str, object]:
 
     Order:
       1. Every City Hall plot gets roads on all four sides (N/E/S/W)
-      2. Side-road paths from each hall to its small companies
-      3. Side-road paths linking all halls (Manhattan MST)
+      2. Edge-street paths from each hall to its small-company **building**
+      3. Edge-street paths linking all halls (Manhattan MST)
+      4. Verify every small company building is street-connected; retry if needed
+
+    Pathfinding routes along plot **edges** (street graph), not tile centers.
     Shared boundaries may be marked on both plots (double-sided OK).
     """
+    from company_sim.roads import connect_points, plots_road_connected
+
     halls: list[tuple[int, int]] = []
     hall_by_city: dict[str, tuple[int, int]] = {}
     for city in world.grid.cities.values():
@@ -160,27 +214,39 @@ def wire_startup_roads(world: World) -> dict[str, object]:
         # 1) City Hall starts with every side roaded
         seed_all_side_roads(world.grid, coord[0], coord[1])
 
-    # 2) Hall → each small company
+    # 2) Hall → each small company building (edge-street path)
     spoke_paths = 0
+    company_sites: list[tuple[str, tuple[int, int], tuple[int, int]]] = []
     for company in world.companies.values():
         if not company.is_small or not company.home_city_id:
             continue
         hall = hall_by_city.get(company.home_city_id)
         if hall is None:
             continue
-        owned = world.owned_plots("company", company.id)
-        if not owned:
+        tile = _company_building_tile(world, company.id)
+        if tile is None:
             continue
-        site = (owned[0].x, owned[0].y)
+        site = (tile.x, tile.y)
+        company_sites.append((company.id, site, hall))
         paths = connect_star(world.grid, hall, [site])
         spoke_paths += len(paths)
 
     # 3) Hall → hall
     hall_paths = connect_points_mst(world.grid, halls)
+
+    # 4) Guarantee every small-company building reaches its hall via streets
+    repaired = 0
+    for _cid, site, hall in company_sites:
+        if plots_road_connected(world.grid, site, hall):
+            continue
+        if connect_points(world.grid, site, hall) is not None:
+            repaired += 1
+
     return {
         "halls": len(halls),
         "spoke_paths": spoke_paths,
         "hall_network_paths": len(hall_paths),
+        "repaired": repaired,
     }
 
 

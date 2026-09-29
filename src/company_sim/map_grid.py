@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from typing import Iterator
 
@@ -558,16 +559,53 @@ def _nearest_city_id(grid: GridMap, x: int, y: int) -> str | None:
     return best_id
 
 
-def place_city_seeds(size: int, count: int) -> list[tuple[int, int]]:
-    """Spread city centers across the map."""
+def place_city_seeds(
+    size: int,
+    count: int,
+    *,
+    rng: random.Random | None = None,
+    min_sep: int | None = None,
+) -> list[tuple[int, int]]:
+    """Spread city centers across the map.
+
+    When ``rng`` is set, pick centers randomly with Chebyshev separation
+    (not a regular grid / line). Otherwise use the deterministic grid layout.
+    """
     if count <= 0:
         return []
     if count == 1:
         return [(size // 2, size // 2)]
+
+    if rng is not None:
+        sep = min_sep if min_sep is not None else max(2, size // (count + 1))
+        points: list[tuple[int, int]] = []
+        # Keep centers off the absolute border a bit
+        margin = max(1, size // 16)
+        lo, hi = margin, max(margin + 1, size - margin)
+        tries = 0
+        while len(points) < count and tries < count * 400:
+            tries += 1
+            x = rng.randrange(lo, hi)
+            y = rng.randrange(lo, hi)
+            if any(max(abs(x - ox), abs(y - oy)) < sep for ox, oy in points):
+                continue
+            points.append((x, y))
+        if len(points) < count:
+            # Relax separation and finish
+            while len(points) < count:
+                x = rng.randrange(size)
+                y = rng.randrange(size)
+                if (x, y) in points:
+                    continue
+                if any(max(abs(x - ox), abs(y - oy)) < 2 for ox, oy in points):
+                    continue
+                points.append((x, y))
+        return points
+
     # Place on a rough grid
     cols = int(count**0.5 + 0.999)
     rows = (count + cols - 1) // cols
-    points: list[tuple[int, int]] = []
+    points = []
     i = 0
     for r in range(rows):
         for c in range(cols):

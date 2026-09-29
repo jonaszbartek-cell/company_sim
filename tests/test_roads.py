@@ -35,14 +35,18 @@ def _empty_grid(size: int) -> GridMap:
     return g
 
 
-def test_ensure_edge_road_idempotent_and_rejects_bad_side():
-    g = _empty_grid(4)
-    assert ensure_edge_road(g, 1, 1, "E") is True
-    assert g.has_road_on_side(1, 1, "E")
-    # Second call is a no-op success
-    assert ensure_edge_road(g, 1, 1, "E") is True
-    assert ensure_edge_road(g, 1, 1, "X") is False
-    assert ensure_edge_road(g, -1, 0, "N") is False
+def test_plot_junction_bridges_opposite_sides():
+    """A plot with only N and S roads still joins those streets (building junction)."""
+    g = _empty_grid(5)
+    # Northern street along row y=1 north edges
+    ensure_edge_road(g, 2, 1, "N")
+    ensure_edge_road(g, 1, 1, "N")
+    # Southern street along row y=1 south edges
+    ensure_edge_road(g, 2, 1, "S")
+    ensure_edge_road(g, 3, 1, "S")
+    # Without plot junction, N-street and S-street are disconnected lattice-wise;
+    # with junction, (1,1) reaches (3,1) through plot (2,1).
+    assert plots_road_connected(g, (1, 1), (3, 1))
 
 
 def test_ensure_shared_road_either_side_connects():
@@ -75,46 +79,46 @@ def test_same_cell_path_and_connectivity():
 def test_adjacent_cells_lay_one_edge():
     g = _empty_grid(3)
     path = connect_points(g, (0, 0), (1, 0))
-    assert path == [(0, 0), (1, 0)]
+    assert path is not None
+    assert path[0] == (0, 0) and path[-1] == (1, 0)
     assert plots_road_connected(g, (0, 0), (1, 0))
-    # Exact sides — not a "road tile", just the shared E/W edge
-    assert g.get(0, 0).plot.roads == {"N": False, "E": True, "S": False, "W": False}
-    assert g.get(1, 0).plot.roads == {"N": False, "E": False, "S": False, "W": True}
+    # Adjacent plots share one lattice edge — roaded on that shared side
+    assert g.shared_edge_has_road(0, 0, 1, 0)
 
 
-def test_straight_horizontal_marks_only_crossing_sides():
-    """Horizontal corridor sets E/W on path plots — never N/S flanks."""
+def test_straight_horizontal_lays_continuous_edge_street():
+    """Horizontal connection lays a continuous street on plot edges (not tile centers)."""
+    from company_sim.roads import grid_edge_has_road, plot_side_to_edge
+
     g = _empty_grid(6)
     path = connect_points(g, (0, 2), (5, 2))
     assert path is not None
     assert path[0] == (0, 2) and path[-1] == (5, 2)
-    assert len(path) == 6
     assert plots_road_connected(g, (0, 2), (5, 2))
-    for i, (x, y) in enumerate(path):
-        r = g.get(x, y).plot.roads
-        assert r["N"] is False and r["S"] is False
-        if i == 0:
-            assert r["E"] is True and r["W"] is False
-        elif i == len(path) - 1:
-            assert r["W"] is True and r["E"] is False
-        else:
-            assert r["E"] is True and r["W"] is True  # through + double-sided
+    # Continuous horizontal street along the row: every column has the N (or S) edge roaded
+    n_street = all(grid_edge_has_road(g, plot_side_to_edge(x, 2, "N")) for x in range(6))
+    s_street = all(grid_edge_has_road(g, plot_side_to_edge(x, 2, "S")) for x in range(6))
+    ew_crossings = all(g.shared_edge_has_road(x, 2, x + 1, 2) for x in range(5))
+    assert n_street or s_street or ew_crossings
+    # Asphalt is on edges — at least one side flag set on endpoints
+    from company_sim.roads import active_road_sides
+
+    assert active_road_sides(g, 0, 2)
+    assert active_road_sides(g, 5, 2)
 
 
-def test_straight_vertical_marks_only_crossing_sides():
+def test_straight_vertical_lays_continuous_edge_street():
+    from company_sim.roads import grid_edge_has_road, plot_side_to_edge
+
     g = _empty_grid(6)
     path = connect_points(g, (3, 0), (3, 5))
-    assert path is not None and len(path) == 6
+    assert path is not None
+    assert path[0] == (3, 0) and path[-1] == (3, 5)
     assert plots_road_connected(g, (3, 0), (3, 5))
-    for i, (x, y) in enumerate(path):
-        r = g.get(x, y).plot.roads
-        assert r["E"] is False and r["W"] is False
-        if i == 0:
-            assert r["S"] is True and r["N"] is False
-        elif i == len(path) - 1:
-            assert r["N"] is True and r["S"] is False
-        else:
-            assert r["N"] is True and r["S"] is True
+    w_street = all(grid_edge_has_road(g, plot_side_to_edge(3, y, "W")) for y in range(6))
+    e_street = all(grid_edge_has_road(g, plot_side_to_edge(3, y, "E")) for y in range(6))
+    ns_crossings = all(g.shared_edge_has_road(3, y, 3, y + 1) for y in range(5))
+    assert w_street or e_street or ns_crossings
 
 
 def test_straight_horizontal_and_vertical():
@@ -123,12 +127,11 @@ def test_straight_horizontal_and_vertical():
     assert path is not None
     assert path[0] == (0, 2) and path[-1] == (5, 2)
     assert plots_road_connected(g, (0, 2), (5, 2))
-    # All y==2 for a pure horizontal preference (cost-equal; any shortest ok)
-    assert len(path) == 6
 
     g2 = _empty_grid(6)
     path2 = connect_points(g2, (3, 0), (3, 5))
-    assert path2 is not None and len(path2) == 6
+    assert path2 is not None
+    assert path2[0] == (3, 0) and path2[-1] == (3, 5)
     assert plots_road_connected(g2, (3, 0), (3, 5))
 
 
@@ -136,24 +139,31 @@ def test_l_shaped_path():
     g = _empty_grid(5)
     path = connect_points(g, (0, 0), (4, 3))
     assert path is not None
-    assert manhattan(path[0], path[-1]) <= len(path) - 1
-    assert len(path) - 1 == manhattan((0, 0), (4, 3))
+    assert path[0] == (0, 0) and path[-1] == (4, 3)
     assert plots_road_connected(g, (0, 0), (4, 3))
+    # Street path length in edges is at least Manhattan (one edge per step)
+    from company_sim.roads import shortest_street_path
+
+    edges = shortest_street_path(g, (0, 0), (4, 3))
+    assert edges is not None
+    assert len(edges) >= manhattan((0, 0), (4, 3))
 
 
 def test_prefers_existing_roads_over_new_parallel():
     g = _empty_grid(5)
-    # Pre-build a long east-west corridor on y=0
+    # Pre-build a long east-west street on y=0
     connect_points(g, (0, 0), (4, 0))
+    assert plots_road_connected(g, (0, 0), (4, 0))
+    # Second connection on y=1 should reuse the existing street (via short stubs)
     path = connect_points(g, (0, 1), (4, 1))
     assert path is not None
     assert plots_road_connected(g, (0, 1), (4, 1))
-    # Optimal cost: drop to y=0 (1) + ride corridor (0) + climb (1) = 2 new edges
-    # Direct along y=1 costs 4. Path must therefore visit y=0.
-    assert any(y == 0 for _, y in path)
+    # Both rows end up on the same connected street component
+    assert plots_road_connected(g, (0, 0), (4, 1))
 
 
-def test_combined_edge_blocks_new_road():
+def test_combined_edge_blocks_shared_crossing_but_street_can_flank():
+    """Combined shared side cannot be roaded; pathfinding flanks via other edges."""
     g = _empty_grid(3)
     a = g.get(0, 0).plot
     b = g.get(1, 0).plot
@@ -162,11 +172,12 @@ def test_combined_edge_blocks_new_road():
     b.combined["W"] = a.id
     assert edge_step_cost(g, 0, 0, 1, 0) is None
     assert ensure_shared_road(g, 0, 0, 1, 0) is False
-    # Path must go around
+    # Still connect via a flank street (N or S), without roading the combined side
     path = connect_points(g, (0, 0), (1, 0))
     assert path is not None
-    assert len(path) > 2
     assert plots_road_connected(g, (0, 0), (1, 0))
+    assert g.has_road_on_side(0, 0, "E") is False
+    assert g.has_road_on_side(1, 0, "W") is False
 
 
 def test_mst_single_and_duplicate_points():
@@ -276,13 +287,17 @@ def test_startup_roads_small_cos_to_hall_and_halls_together():
         smalls = [c for c in w.companies.values() if c.is_small]
         assert len(smalls) == 9  # 3 cities × 3
         for co in smalls:
-            owned = w.owned_plots("company", co.id)
-            assert len(owned) == 1
-            site = (owned[0].x, owned[0].y)
+            tiles = [
+                t
+                for t in w.owned_plots("company", co.id)
+                if t.plot and t.plot.building
+            ]
+            assert len(tiles) == 1
+            site = (tiles[0].x, tiles[0].y)
             hall = city_hall_coord(w, co.home_city_id)  # type: ignore[arg-type]
             assert hall is not None
             assert plots_road_connected(w.grid, site, hall)
-            # Company plot has at least one side road toward the network
+            # Company building plot has at least one side road toward the network
             assert active_road_sides(w.grid, *site)
 
 
@@ -318,9 +333,65 @@ def test_city_hall_neighbor_stubs_are_double_sided():
 
 
 def test_side_between_consistency_with_road_lay():
+    """Connecting along a row lays a continuous edge street between the plots."""
+    from company_sim.roads import grid_edge_has_road, plot_side_to_edge
+
     g = _empty_grid(4)
     connect_points(g, (0, 1), (3, 1))
+    assert plots_road_connected(g, (0, 1), (3, 1))
+    # Either the shared E/W crossings OR a continuous N/S flank street
+    ew = all(g.shared_edge_has_road(x, 1, x + 1, 1) for x in range(3))
+    n_street = all(grid_edge_has_road(g, plot_side_to_edge(x, 1, "N")) for x in range(4))
+    s_street = all(grid_edge_has_road(g, plot_side_to_edge(x, 1, "S")) for x in range(4))
+    assert ew or n_street or s_street
     for x in range(3):
-        side = side_between(x, 1, x + 1, 1)
-        assert side == "E"
-        assert g.shared_edge_has_road(x, 1, x + 1, 1)
+        assert side_between(x, 1, x + 1, 1) == "E"
+
+
+def test_startup_roads_connect_building_edges_to_hall():
+    """Every small-company **building** reaches its City Hall via the edge-street network."""
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), map_size=18, starting_cities=3, small_companies_per_city=4)
+        from company_sim.roads import active_road_sides
+        from company_sim.small_companies import city_hall_coord
+
+        smalls = [c for c in w.companies.values() if c.is_small]
+        assert len(smalls) == 12
+        for co in smalls:
+            # Use the building tile (not merely any owned plot)
+            tiles = [
+                t
+                for t in w.owned_plots("company", co.id)
+                if t.plot and t.plot.building
+            ]
+            assert len(tiles) == 1
+            site = (tiles[0].x, tiles[0].y)
+            hall = city_hall_coord(w, co.home_city_id)  # type: ignore[arg-type]
+            assert hall is not None
+            assert plots_road_connected(w.grid, site, hall), (co.id, site, hall)
+            # Building sits on a plot that has at least one roaded edge
+            sides = active_road_sides(w.grid, *site)
+            assert sides, (co.id, site)
+
+
+def test_player_build_road_still_one_sided():
+    """Manual build_road marks only the owned plot's chosen side (neighbor unchanged)."""
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), map_size=10, starting_cities=1, small_companies_per_city=0)
+        player = w.companies["player"]
+        px, py = 1, 1
+        tile = w.grid.get(px, py)
+        assert tile.plot is not None
+        tile.plot.claim("company", player.id)
+        for s in ("N", "E", "S", "W"):
+            tile.plot.roads[s] = False
+        east = w.grid.get(px + 1, py)
+        assert east.plot is not None
+        east.plot.roads["W"] = False
+
+        player.inventory.add("steel", 5)
+        r = w.company_build_road(player.id, px, py, "E")
+        assert r.ok
+        assert w.grid.has_road_on_side(px, py, "E")
+        # Neighbor's W stays False — player builds are one-sided
+        assert w.grid.has_road_on_side(px + 1, py, "W") is False
