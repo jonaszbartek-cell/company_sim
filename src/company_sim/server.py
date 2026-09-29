@@ -29,6 +29,8 @@ class SetupBody(BaseModel):
     # Percent of all plots that become specialized mine/well resource clusters
     specialized_plot_percent: float = Field(default=15.0, ge=0.0, le=100.0)
     llm_debug: bool = False
+    # When set, place cities randomly (not a grid/line) using this RNG seed
+    city_placement_seed: int | None = Field(default=None, ge=0)
 
 
 class BuildBody(BaseModel):
@@ -239,6 +241,7 @@ def create_app() -> FastAPI:
                     small_companies_per_city=body.small_companies_per_city,
                     specialized_plot_percent=body.specialized_plot_percent,
                     llm_debug=bool(body.llm_debug),
+                    city_placement_seed=body.city_placement_seed,
                 )
             )
             app.state.world = world

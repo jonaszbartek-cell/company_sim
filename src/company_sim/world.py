@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -42,6 +43,8 @@ class WorldConfig:
     # If > 0, seed market with this many of EVERY catalog item at market_seed_price
     market_seed_qty: int = 0
     market_seed_price: int = 1
+    # When set, place city centers randomly (not on a regular grid/line) using this seed
+    city_placement_seed: int | None = None
     # Deprecated aliases (tests / older callers); folded into square map_size = max(w, h)
     map_width: int | None = None
     map_height: int | None = None
@@ -129,7 +132,14 @@ class World:
             raise ActionError("small_companies_per_city cannot be negative")
 
         content = GameContent.load()
-        centers = place_city_seeds(config.map_size, config.starting_cities)
+        if config.city_placement_seed is not None:
+            centers = place_city_seeds(
+                config.map_size,
+                config.starting_cities,
+                rng=random.Random(int(config.city_placement_seed)),
+            )
+        else:
+            centers = place_city_seeds(config.map_size, config.starting_cities)
         seeds = []
         for i, (cx, cy) in enumerate(centers):
             cid = f"city_{chr(ord('a') + i)}" if i < 26 else f"city_{i+1}"
