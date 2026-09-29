@@ -1,26 +1,32 @@
 @echo off
 setlocal EnableExtensions
-title company_sim - Windows install and launch
+title company_sim - Install
 
-:: Double-click this file once. It will:
-::   1) Find or clone this repo
-::   2) Install Python 3.11+ if missing (winget)
-::   3) Install Ollama if missing (winget / download)
-::   4) Start Ollama and pull qwen2.5:3b-instruct
-::   5) Create a venv and install Python deps
-::   6) Write Launch-CompanySim.bat for next time
-::   7) Start the game with LLM rivals enabled
+:: INSTALL ONLY
+:: Double-click once. Automatically installs everything needed:
+::   - Python (game engine)
+::   - Ollama (local AI)
+::   - AI model qwen2.5:3b-instruct
+::   - Game runtime files
+:: Then use Launch-CompanySim.bat to play.
 ::
-:: Re-run anytime; steps already done are skipped.
+:: Safe to re-run; already-installed pieces are skipped.
 
 cd /d "%~dp0"
-powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-CompanySim.ps1" %*
+echo.
+echo Installing company_sim - please wait...
+echo.
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0Install-CompanySim.ps1" -SkipLaunch %*
 set "ERR=%ERRORLEVEL%"
+echo.
 if not "%ERR%"=="0" (
-  echo.
-  echo Install failed with exit code %ERR%.
+  echo Install FAILED.
   pause
   exit /b %ERR%
 )
+echo Install finished.
+echo Double-click Launch-CompanySim.bat to play.
+echo.
+pause
 endlocal
 exit /b 0

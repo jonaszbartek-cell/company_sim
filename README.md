@@ -11,9 +11,10 @@ Company economic simulator (Python + Web UI) with local LLM rivals.
 - [data/README.md](data/README.md)
 - [docs/LLM.md](docs/LLM.md)
 
-## Run (Windows — one click)
+## Run (Windows)
 
-Double-click **`Install-CompanySim.bat`**. It installs Python (if needed), Ollama, pulls `qwen2.5:3b-instruct`, sets up the game, then launches with LLM rivals enabled. Later runs: double-click **`Launch-CompanySim.bat`** (created by the installer).
+1. Double-click **`Install-CompanySim.bat`** once — installs Python, Ollama, the AI model, and the game automatically.
+2. Double-click **`Launch-CompanySim.bat`** to play — starts Ollama + the game together; when you quit the game, Ollama started by Launch is stopped.
 
 ## Run (dev)
 
