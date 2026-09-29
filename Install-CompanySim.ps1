@@ -98,12 +98,15 @@ function Install-PythonRuntime {
 }
 
 function Get-OllamaExe {
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
-    (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
-  )
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA "Programs/Ollama/ollama.exe")
+  }
+  if ($env:ProgramFiles) {
+    $candidates += (Join-Path $env:ProgramFiles "Ollama/ollama.exe")
+  }
   foreach ($c in $candidates) {
-    if (Test-Path $c) { return $c }
+    if ($c -and (Test-Path $c)) { return $c }
   }
   $cmd = Get-Command "ollama" -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
@@ -136,12 +139,24 @@ function Install-OllamaApp {
   return $exe
 }
 
+function Start-BackgroundProcess([string]$FilePath, [string[]]$ArgumentList) {
+  $params = @{
+    FilePath = $FilePath
+    ArgumentList = $ArgumentList
+    PassThru = $true
+  }
+  if ($IsWindows -or $env:OS -match "Windows") {
+    $params.WindowStyle = "Hidden"
+  }
+  return Start-Process @params
+}
+
 function Start-OllamaForInstall([string]$OllamaExe) {
   $already = Test-OllamaApi
   if ($already) {
     return [pscustomobject]@{ StartedByUs = $false; Process = $null }
   }
-  $proc = Start-Process -FilePath $OllamaExe -ArgumentList "serve" -WindowStyle Hidden -PassThru
+  $proc = Start-BackgroundProcess -FilePath $OllamaExe -ArgumentList @("serve")
   $deadline = (Get-Date).AddSeconds(90)
   while ((Get-Date) -lt $deadline) {
     if (Test-OllamaApi) {
@@ -156,7 +171,10 @@ function Stop-OllamaIfOurs($Handle) {
   if (-not $Handle -or -not $Handle.StartedByUs -or -not $Handle.Process) { return }
   try {
     if (-not $Handle.Process.HasExited) {
-      & taskkill.exe /PID $Handle.Process.Id /T /F 2>$null | Out-Null
+      if ($IsWindows -or $env:OS -match "Windows") {
+        & taskkill.exe /PID $Handle.Process.Id /T /F 2>$null | Out-Null
+      }
+      try { Stop-Process -Id $Handle.Process.Id -Force -ErrorAction SilentlyContinue } catch { }
     }
   } catch { }
 }
@@ -192,18 +210,32 @@ function Resolve-RepoRoot {
   return $root
 }
 
+function Get-RuntimePython([string]$RepoRoot) {
+  $candidates = @(
+    (Join-Path $RepoRoot ".venv/Scripts/python.exe"),
+    (Join-Path $RepoRoot ".venv/bin/python"),
+    (Join-Path $RepoRoot ".venv/bin/python3")
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
 function Install-GameRuntime([object]$Python, [string]$RepoRoot) {
   Write-Step "Installing game runtime"
   $runtimeDir = Join-Path $RepoRoot ".venv"
-  $runtimePy = Join-Path $runtimeDir "Scripts\python.exe"
-  if (-not (Test-Path $runtimePy)) {
+  $runtimePy = Get-RuntimePython $RepoRoot
+  if (-not $runtimePy) {
     if ($Python.Cmd -eq "py") {
       & py -3 -m venv $runtimeDir
     } else {
       & $Python.Exe -m venv $runtimeDir
     }
     if ($LASTEXITCODE -ne 0) { throw "Could not create game runtime." }
+    $runtimePy = Get-RuntimePython $RepoRoot
   }
+  if (-not $runtimePy) { throw "Game runtime python was not created." }
   & $runtimePy -m pip install --upgrade pip --disable-pip-version-check | Out-Null
   & $runtimePy -m pip install -r (Join-Path $RepoRoot "requirements.txt") --disable-pip-version-check
   if ($LASTEXITCODE -ne 0) { throw "Could not install game packages." }

@@ -15,8 +15,20 @@ $RepoRoot = $PSScriptRoot
 if (-not $RepoRoot) { $RepoRoot = (Get-Location).Path }
 Set-Location $RepoRoot
 
-$VenvPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
-$Marker = Join-Path $RepoRoot "src\company_sim\__main__.py"
+function Resolve-GamePython([string]$Root) {
+  $candidates = @(
+    (Join-Path $Root ".venv/Scripts/python.exe"),
+    (Join-Path $Root ".venv/bin/python"),
+    (Join-Path $Root ".venv/bin/python3")
+  )
+  foreach ($c in $candidates) {
+    if (Test-Path $c) { return $c }
+  }
+  return $null
+}
+
+$VenvPython = Resolve-GamePython $RepoRoot
+$Marker = Join-Path $RepoRoot "src/company_sim/__main__.py"
 $ConfigPath = Join-Path $RepoRoot "company_sim.windows.json"
 if (Test-Path $ConfigPath) {
   try {
@@ -35,12 +47,15 @@ function Test-OllamaApi {
 }
 
 function Get-OllamaExe {
-  $candidates = @(
-    (Join-Path $env:LOCALAPPDATA "Programs\Ollama\ollama.exe"),
-    (Join-Path $env:ProgramFiles "Ollama\ollama.exe")
-  )
+  $candidates = @()
+  if ($env:LOCALAPPDATA) {
+    $candidates += (Join-Path $env:LOCALAPPDATA "Programs/Ollama/ollama.exe")
+  }
+  if ($env:ProgramFiles) {
+    $candidates += (Join-Path $env:ProgramFiles "Ollama/ollama.exe")
+  }
   foreach ($c in $candidates) {
-    if (Test-Path $c) { return $c }
+    if ($c -and (Test-Path $c)) { return $c }
   }
   $cmd = Get-Command "ollama" -ErrorAction SilentlyContinue
   if ($cmd) { return $cmd.Source }
@@ -56,12 +71,26 @@ function Wait-OllamaReady([int]$Seconds = 90) {
   return $false
 }
 
+function Start-BackgroundProcess([string]$FilePath, [string[]]$ArgumentList) {
+  $params = @{
+    FilePath = $FilePath
+    ArgumentList = $ArgumentList
+    PassThru = $true
+  }
+  if ($IsWindows -or $env:OS -match "Windows") {
+    $params.WindowStyle = "Hidden"
+  }
+  return Start-Process @params
+}
+
 function Stop-OllamaTree([System.Diagnostics.Process]$ServeProcess) {
   if ($null -eq $ServeProcess) { return }
   try {
     if (-not $ServeProcess.HasExited) {
-      # Kill serve and children (Windows often spawns helper processes)
-      & taskkill.exe /PID $ServeProcess.Id /T /F 2>$null | Out-Null
+      if ($IsWindows -or $env:OS -match "Windows") {
+        & taskkill.exe /PID $ServeProcess.Id /T /F 2>$null | Out-Null
+      }
+      try { Stop-Process -Id $ServeProcess.Id -Force -ErrorAction SilentlyContinue } catch { }
     }
   } catch { }
   try { $ServeProcess.Dispose() } catch { }
@@ -71,7 +100,7 @@ if (-not (Test-Path $Marker)) {
   Write-Host "ERROR: Game files not found in $RepoRoot" -ForegroundColor Red
   exit 1
 }
-if (-not (Test-Path $VenvPython)) {
+if (-not $VenvPython) {
   Write-Host "ERROR: Game is not installed. Run Install-CompanySim.bat first." -ForegroundColor Red
   exit 1
 }
@@ -89,7 +118,7 @@ $wasAlreadyUp = Test-OllamaApi
 try {
   if (-not $wasAlreadyUp) {
     Write-Host "Starting Ollama (AI)..." -ForegroundColor Cyan
-    $serveProc = Start-Process -FilePath $ollamaExe -ArgumentList "serve" -WindowStyle Hidden -PassThru
+    $serveProc = Start-BackgroundProcess -FilePath $ollamaExe -ArgumentList @("serve")
     $startedByUs = $true
     if (-not (Wait-OllamaReady)) {
       throw "Ollama did not start. Try opening the Ollama app once, then launch again."
@@ -117,9 +146,26 @@ try {
   $env:COMPANY_SIM_LLM_URL = "http://127.0.0.1:11434"
   $env:PYTHONPATH = "src"
 
-  $game = Start-Process -FilePath $VenvPython -ArgumentList "-m", "company_sim" -WorkingDirectory $RepoRoot -NoNewWindow -PassThru
+  # On headless/CI hosts, skip opening a browser window.
+  $gameArgs = @("-m", "company_sim")
+  if ($env:COMPANY_SIM_NO_BROWSER -eq "1") {
+    $gameArgs += "--no-browser"
+  }
+
+  $gameParams = @{
+    FilePath = $VenvPython
+    ArgumentList = $gameArgs
+    WorkingDirectory = $RepoRoot
+    PassThru = $true
+  }
+  if ($IsWindows -or $env:OS -match "Windows") {
+    $gameParams.NoNewWindow = $true
+  }
+  $game = Start-Process @gameParams
   Wait-Process -Id $game.Id
-  exit $game.ExitCode
+  $code = 0
+  if ($null -ne $game.ExitCode) { $code = $game.ExitCode }
+  exit $code
 }
 catch {
   Write-Host ""
