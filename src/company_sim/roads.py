@@ -1,11 +1,14 @@
 """Road pathfinding and free engine placement.
 
-Roads are plot-local edge flags (N/E/S/W). Two adjacent plots are connected when
-either side of the shared edge has a road (`GridMap.shared_edge_has_road`).
+Roads are never tiles. Each plot has four optional edge flags (N/E/S/W).
+Building a road means setting ``plot.roads[side] = True`` on that plot only
+(player builds) — or, for engine startup wiring, optionally marking *both*
+plots' sides of the shared edge (double-sided). Double-sided is allowed and
+intentional: either side alone is enough for ``shared_edge_has_road``.
 
-Startup wiring uses Dijkstra over the grid:
-  - cost 0 to step across an edge that already has a road
-  - cost 1 to step across a free edge (will lay a new road)
+Startup wiring uses Dijkstra over adjacent plots:
+  - cost 0 to step across an edge that already has a road (either side)
+  - cost 1 to step across a free edge (will lay a new side road)
   - impassable when the edge is blocked by plot combines on both sides
 """
 
@@ -45,11 +48,18 @@ def ensure_edge_road(grid: GridMap, x: int, y: int, side: str) -> bool:
 
 
 def ensure_shared_road(grid: GridMap, x1: int, y1: int, x2: int, y2: int) -> bool:
-    """Ensure the shared edge between two adjacent plots has a road (either side)."""
+    """Ensure the shared *side* between two adjacent plots has a road.
+
+    Marks the edge on both plots when possible (double-sided — allowed).
+    Connectivity only needs one side; see ``GridMap.shared_edge_has_road``.
+    """
     side = side_between(x1, y1, x2, y2)
     if side is None:
         return False
     if grid.shared_edge_has_road(x1, y1, x2, y2):
+        # Still try to fill the missing opposite side (double-sided is fine)
+        ensure_edge_road(grid, x1, y1, side)
+        ensure_edge_road(grid, x2, y2, OPPOSITE[side])
         return True
     a_ok = ensure_edge_road(grid, x1, y1, side)
     b_ok = ensure_edge_road(grid, x2, y2, OPPOSITE[side])

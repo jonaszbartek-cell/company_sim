@@ -49,8 +49,20 @@ def test_ensure_shared_road_either_side_connects():
     g = _empty_grid(4)
     assert ensure_shared_road(g, 1, 1, 2, 1) is True
     assert g.shared_edge_has_road(1, 1, 2, 1)
-    # Connectivity does not require both sides
+    # Double-sided is allowed: both plots may mark the shared edge
+    assert g.has_road_on_side(1, 1, "E")
+    assert g.has_road_on_side(2, 1, "W")
     assert plots_road_connected(g, (1, 1), (2, 1))
+
+
+def test_double_sided_completes_missing_opposite():
+    """If only one plot has the shared side, ensure_shared_road fills the other."""
+    g = _empty_grid(3)
+    assert ensure_edge_road(g, 0, 1, "E") is True
+    assert g.has_road_on_side(0, 1, "E")
+    assert g.has_road_on_side(1, 1, "W") is False
+    assert ensure_shared_road(g, 0, 1, 1, 1) is True
+    assert g.has_road_on_side(1, 1, "W") is True
 
 
 def test_same_cell_path_and_connectivity():
@@ -65,6 +77,44 @@ def test_adjacent_cells_lay_one_edge():
     path = connect_points(g, (0, 0), (1, 0))
     assert path == [(0, 0), (1, 0)]
     assert plots_road_connected(g, (0, 0), (1, 0))
+    # Exact sides — not a "road tile", just the shared E/W edge
+    assert g.get(0, 0).plot.roads == {"N": False, "E": True, "S": False, "W": False}
+    assert g.get(1, 0).plot.roads == {"N": False, "E": False, "S": False, "W": True}
+
+
+def test_straight_horizontal_marks_only_crossing_sides():
+    """Horizontal corridor sets E/W on path plots — never N/S flanks."""
+    g = _empty_grid(6)
+    path = connect_points(g, (0, 2), (5, 2))
+    assert path is not None
+    assert path[0] == (0, 2) and path[-1] == (5, 2)
+    assert len(path) == 6
+    assert plots_road_connected(g, (0, 2), (5, 2))
+    for i, (x, y) in enumerate(path):
+        r = g.get(x, y).plot.roads
+        assert r["N"] is False and r["S"] is False
+        if i == 0:
+            assert r["E"] is True and r["W"] is False
+        elif i == len(path) - 1:
+            assert r["W"] is True and r["E"] is False
+        else:
+            assert r["E"] is True and r["W"] is True  # through + double-sided
+
+
+def test_straight_vertical_marks_only_crossing_sides():
+    g = _empty_grid(6)
+    path = connect_points(g, (3, 0), (3, 5))
+    assert path is not None and len(path) == 6
+    assert plots_road_connected(g, (3, 0), (3, 5))
+    for i, (x, y) in enumerate(path):
+        r = g.get(x, y).plot.roads
+        assert r["E"] is False and r["W"] is False
+        if i == 0:
+            assert r["S"] is True and r["N"] is False
+        elif i == len(path) - 1:
+            assert r["N"] is True and r["S"] is False
+        else:
+            assert r["N"] is True and r["S"] is True
 
 
 def test_straight_horizontal_and_vertical():
