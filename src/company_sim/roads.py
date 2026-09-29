@@ -1,21 +1,33 @@
-"""Road pathfinding and free engine placement.
+"""Road pathfinding on plot **edges** (street graph), not tile centers.
 
 Roads are plot-side flags only: each plot has ``roads = {N,E,S,W}`` booleans.
-Graphics use the per-plot bitmask (N=1 E=2 S=4 W=8) so asphalt arms sit on those
+Graphics use the per-plot bitmask (N=1 E=2 S=4 W=8) so asphalt sits on those
 sides. A shared boundary may be marked on one or both adjacent plots
 (double-sided is allowed).
 
+Street model
+------------
+Each roaded side is a **grid edge** (a segment of the lattice between cells):
+
+* Plot ``(x,y).N`` / ``(x,y-1).S`` → horizontal edge ``('H', x, y)``
+* Plot ``(x,y).W`` / ``(x-1,y).E`` → vertical edge ``('V', x, y)``
+
+Two grid edges are adjacent when they share a vertex (colinear street
+continuation or a corner turn). Buildings access the network through any of
+their four incident edges. Pathfinding routes along this street graph and lays
+roads on the chosen edges so every small company can reach City Hall.
+
 Startup order (see ``small_companies.wire_startup_roads``):
-  1. City Hall plot gets roads on all four sides
-  2. Side-roads are laid connecting each hall → its small companies
-  3. Side-roads are laid connecting halls to each other (Manhattan MST)
+  1. City Hall plot gets roads on all four sides (double-sided stubs)
+  2. Edge-street paths from each hall → its small companies
+  3. Edge-street paths linking halls (Manhattan MST)
 """
 
 from __future__ import annotations
 
 import heapq
 from collections import deque
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from company_sim.plots import OPPOSITE, SIDE_DELTA, SIDES, side_between
 
@@ -23,6 +35,9 @@ if TYPE_CHECKING:
     from company_sim.map_grid import GridMap
 
 Coord = tuple[int, int]
+# ('H', x, y) = horizontal lattice edge north of cell row y (south of y-1), col x
+# ('V', x, y) = vertical lattice edge west of cell col x (east of x-1), row y
+GridEdge = tuple[Literal["H", "V"], int, int]
 
 
 def ensure_edge_road(grid: GridMap, x: int, y: int, side: str) -> bool:
@@ -83,6 +98,119 @@ def active_road_sides(grid: GridMap, x: int, y: int) -> list[str]:
     return [s for s in SIDES if tile.plot.roads.get(s)]
 
 
+# ---------------------------------------------------------------------------
+# Grid-edge street graph
+# ---------------------------------------------------------------------------
+
+
+def plot_side_to_edge(x: int, y: int, side: str) -> GridEdge:
+    side = side.upper()
+    if side == "N":
+        return ("H", x, y)
+    if side == "S":
+        return ("H", x, y + 1)
+    if side == "W":
+        return ("V", x, y)
+    if side == "E":
+        return ("V", x + 1, y)
+    raise ValueError(f"Invalid side {side}")
+
+
+def plot_incident_edges(x: int, y: int) -> list[tuple[str, GridEdge]]:
+    """(side, grid-edge) for each of the four borders of plot (x,y)."""
+    return [(s, plot_side_to_edge(x, y, s)) for s in SIDES]
+
+
+def edge_touching_plots(edge: GridEdge) -> list[tuple[int, int, str]]:
+    """Plots that can mark this grid edge, as (x, y, side)."""
+    kind, a, b = edge
+    out: list[tuple[int, int, str]] = []
+    if kind == "H":
+        # ('H', x, y): north of (x,y) and south of (x, y-1)
+        x, y = a, b
+        out.append((x, y, "N"))
+        out.append((x, y - 1, "S"))
+    else:
+        # ('V', x, y): west of (x,y) and east of (x-1, y)
+        x, y = a, b
+        out.append((x, y, "W"))
+        out.append((x - 1, y, "E"))
+    return out
+
+
+def grid_edge_has_road(grid: GridMap, edge: GridEdge) -> bool:
+    for x, y, side in edge_touching_plots(edge):
+        if grid.in_bounds(x, y) and grid.has_road_on_side(x, y, side):
+            return True
+    return False
+
+
+def grid_edge_can_build(grid: GridMap, edge: GridEdge) -> bool:
+    """True if at least one touching plot can accept a road on that side."""
+    if grid_edge_has_road(grid, edge):
+        return True
+    for x, y, side in edge_touching_plots(edge):
+        if not grid.in_bounds(x, y):
+            continue
+        tile = grid.get(x, y)
+        if not tile.plot:
+            continue
+        if tile.plot.combined.get(side):
+            continue
+        return True
+    return False
+
+
+def mark_grid_edge(grid: GridMap, edge: GridEdge, *, double_sided: bool = True) -> bool:
+    """Lay asphalt on a lattice edge (one or both touching plot sides)."""
+    marked = False
+    touches = edge_touching_plots(edge)
+    if double_sided:
+        for x, y, side in touches:
+            if ensure_edge_road(grid, x, y, side):
+                marked = True
+    else:
+        # Prefer an in-bounds plot that can take the road
+        for x, y, side in touches:
+            if ensure_edge_road(grid, x, y, side):
+                marked = True
+                break
+    return marked or grid_edge_has_road(grid, edge)
+
+
+def grid_edge_neighbors(edge: GridEdge) -> list[GridEdge]:
+    """Lattice edges that share a vertex with ``edge`` (street continuation / turn)."""
+    kind, a, b = edge
+    out: list[GridEdge] = []
+    if kind == "H":
+        x, y = a, b
+        # Colinear east/west along the same horizontal street
+        out.append(("H", x - 1, y))
+        out.append(("H", x + 1, y))
+        # Corner turns onto vertical streets at both endpoints
+        out.append(("V", x, y - 1))
+        out.append(("V", x, y))
+        out.append(("V", x + 1, y - 1))
+        out.append(("V", x + 1, y))
+    else:
+        x, y = a, b
+        out.append(("V", x, y - 1))
+        out.append(("V", x, y + 1))
+        out.append(("H", x - 1, y))
+        out.append(("H", x, y))
+        out.append(("H", x - 1, y + 1))
+        out.append(("H", x, y + 1))
+    return out
+
+
+def _edge_in_map(grid: GridMap, edge: GridEdge) -> bool:
+    """True if the edge touches at least one in-bounds plot cell."""
+    for x, y, _side in edge_touching_plots(edge):
+        if grid.in_bounds(x, y) and grid.get(x, y).plot is not None:
+            return True
+    return False
+
+
 def edge_step_cost(grid: GridMap, x1: int, y1: int, x2: int, y2: int) -> float | None:
     """Cost to cross the shared side between adjacent plots (0 if already roaded)."""
     side = side_between(x1, y1, x2, y2)
@@ -112,56 +240,96 @@ def neighbors4(grid: GridMap, x: int, y: int) -> list[Coord]:
     return out
 
 
-def shortest_path(
+def street_edge_cost(grid: GridMap, edge: GridEdge) -> float | None:
+    """0 if roaded, 1 if buildable, None if blocked / off-map."""
+    if not _edge_in_map(grid, edge):
+        return None
+    if grid_edge_has_road(grid, edge):
+        return 0.0
+    if grid_edge_can_build(grid, edge):
+        return 1.0
+    return None
+
+
+def shortest_street_path(
     grid: GridMap,
     start: Coord,
     goal: Coord,
-) -> list[Coord] | None:
-    """Lowest-cost plot path (prefers sides that already have roads)."""
+) -> list[GridEdge] | None:
+    """Lowest-cost path along the street (grid-edge) graph between two plots.
+
+    Returns the list of lattice edges to road (may already be roaded). Empty
+    list means start==goal (same plot already has access to itself).
+    """
     if start == goal:
-        return [start]
+        return []
     if not grid.in_bounds(*start) or not grid.in_bounds(*goal):
         return None
     if grid.get(*start).plot is None or grid.get(*goal).plot is None:
         return None
 
-    pq: list[tuple[float, int, int, int]] = [(0.0, 0, start[0], start[1])]
-    best: dict[Coord, float] = {start: 0.0}
-    prev: dict[Coord, Coord | None] = {start: None}
-
-    while pq:
-        cost, steps, x, y = heapq.heappop(pq)
-        if (x, y) == goal:
-            break
-        if cost > best.get((x, y), float("inf")):
+    goal_edges = {e for _, e in plot_incident_edges(*goal)}
+    # Multi-source Dijkstra from all four sides of start
+    pq: list[tuple[float, int, GridEdge]] = []
+    best: dict[GridEdge, float] = {}
+    prev: dict[GridEdge, GridEdge | None] = {}
+    seq = 0
+    for _side, edge in plot_incident_edges(*start):
+        cost = street_edge_cost(grid, edge)
+        if cost is None:
             continue
-        for nx, ny in neighbors4(grid, x, y):
-            step = edge_step_cost(grid, x, y, nx, ny)
+        best[edge] = cost
+        prev[edge] = None
+        heapq.heappush(pq, (cost, seq, edge))
+        seq += 1
+
+    found: GridEdge | None = None
+    found_cost = float("inf")
+    while pq:
+        cost, _, edge = heapq.heappop(pq)
+        if cost > best.get(edge, float("inf")):
+            continue
+        if edge in goal_edges and cost < found_cost:
+            found = edge
+            found_cost = cost
+            # Still search: a cheaper goal edge may appear, but with
+            # non-negative weights we can stop when we first pop a goal edge.
+            break
+        for nxt in grid_edge_neighbors(edge):
+            step = street_edge_cost(grid, nxt)
             if step is None:
                 continue
             ncost = cost + step
-            key = (nx, ny)
-            if ncost < best.get(key, float("inf")):
-                best[key] = ncost
-                prev[key] = (x, y)
-                heapq.heappush(pq, (ncost, steps + 1, nx, ny))
+            if ncost < best.get(nxt, float("inf")):
+                best[nxt] = ncost
+                prev[nxt] = edge
+                heapq.heappush(pq, (ncost, seq, nxt))
+                seq += 1
 
-    if goal not in prev:
+    if found is None:
         return None
 
-    path: list[Coord] = []
-    cur: Coord | None = goal
+    path: list[GridEdge] = []
+    cur: GridEdge | None = found
     while cur is not None:
         path.append(cur)
         cur = prev.get(cur)
     path.reverse()
-    if path[0] != start:
-        return None
     return path
 
 
+def lay_roads_along_edges(grid: GridMap, edges: list[GridEdge]) -> int:
+    """Mark each lattice edge (double-sided when possible). Returns newly laid count."""
+    laid = 0
+    for edge in edges:
+        before = grid_edge_has_road(grid, edge)
+        if mark_grid_edge(grid, edge, double_sided=True) and not before:
+            laid += 1
+    return laid
+
+
 def lay_roads_along_path(grid: GridMap, path: list[Coord]) -> int:
-    """For each step, mark the shared side (both plots when possible)."""
+    """Legacy helper: for each plot-step, mark the shared side (both plots)."""
     if len(path) < 2:
         return 0
     laid = 0
@@ -172,52 +340,120 @@ def lay_roads_along_path(grid: GridMap, path: list[Coord]) -> int:
     return laid
 
 
-def connect_points(grid: GridMap, start: Coord, goal: Coord) -> list[Coord] | None:
-    """Pathfind then lay side-roads so start and goal share a road network."""
-    path = shortest_path(grid, start, goal)
-    if path is None:
+def shortest_path(
+    grid: GridMap,
+    start: Coord,
+    goal: Coord,
+) -> list[Coord] | None:
+    """Plot cells touched by the street path from start to goal (for tests/UI)."""
+    if start == goal:
+        return [start]
+    edges = shortest_street_path(grid, start, goal)
+    if edges is None:
         return None
-    lay_roads_along_path(grid, path)
-    return path
+    # Reconstruct an ordered list of plots that touch the street path, starting
+    # at ``start`` and ending at ``goal``.
+    plots: list[Coord] = [start]
+    seen = {start}
+    for edge in edges:
+        for x, y, _side in edge_touching_plots(edge):
+            if not grid.in_bounds(x, y) or grid.get(x, y).plot is None:
+                continue
+            if (x, y) not in seen:
+                seen.add((x, y))
+                plots.append((x, y))
+    if goal not in seen:
+        plots.append(goal)
+    elif plots[-1] != goal:
+        # Move goal to the end for a clean start→goal listing
+        plots = [p for p in plots if p != goal] + [goal]
+    return plots
+
+
+def connect_points(grid: GridMap, start: Coord, goal: Coord) -> list[Coord] | None:
+    """Pathfind on the street graph then lay edge roads so start↔goal connect."""
+    if start == goal:
+        return [start]
+    edges = shortest_street_path(grid, start, goal)
+    if edges is None:
+        return None
+    lay_roads_along_edges(grid, edges)
+    return shortest_path(grid, start, goal) or [start, goal]
 
 
 def plots_road_connected(grid: GridMap, start: Coord, goal: Coord) -> bool:
-    """BFS over shared sides that already have a road (either plot)."""
+    """True if start and goal share a connected street (edge) network."""
     if start == goal:
         return True
     if not grid.in_bounds(*start) or not grid.in_bounds(*goal):
         return False
-    seen = {start}
-    q: deque[Coord] = deque([start])
+    if grid.get(*start).plot is None or grid.get(*goal).plot is None:
+        return False
+
+    start_edges = [
+        e
+        for _, e in plot_incident_edges(*start)
+        if grid_edge_has_road(grid, e)
+    ]
+    if not start_edges:
+        return False
+    goal_edges = {
+        e for _, e in plot_incident_edges(*goal) if grid_edge_has_road(grid, e)
+    }
+    if not goal_edges:
+        return False
+
+    seen: set[GridEdge] = set()
+    q: deque[GridEdge] = deque()
+    for e in start_edges:
+        seen.add(e)
+        q.append(e)
     while q:
-        x, y = q.popleft()
-        for nx, ny in neighbors4(grid, x, y):
-            if (nx, ny) in seen:
+        edge = q.popleft()
+        if edge in goal_edges:
+            return True
+        for nxt in grid_edge_neighbors(edge):
+            if nxt in seen:
                 continue
-            if not grid.shared_edge_has_road(x, y, nx, ny):
+            if not grid_edge_has_road(grid, nxt):
                 continue
-            if (nx, ny) == goal:
-                return True
-            seen.add((nx, ny))
-            q.append((nx, ny))
+            seen.add(nxt)
+            q.append(nxt)
     return False
 
 
 def connected_component(grid: GridMap, start: Coord) -> set[Coord]:
+    """All plots that have road access on the same street network as ``start``."""
     if not grid.in_bounds(*start) or grid.get(*start).plot is None:
         return set()
-    seen = {start}
-    q: deque[Coord] = deque([start])
+    start_edges = [
+        e for _, e in plot_incident_edges(*start) if grid_edge_has_road(grid, e)
+    ]
+    if not start_edges:
+        return {start}
+
+    seen_edges: set[GridEdge] = set()
+    q: deque[GridEdge] = deque()
+    for e in start_edges:
+        seen_edges.add(e)
+        q.append(e)
     while q:
-        x, y = q.popleft()
-        for nx, ny in neighbors4(grid, x, y):
-            if (nx, ny) in seen:
+        edge = q.popleft()
+        for nxt in grid_edge_neighbors(edge):
+            if nxt in seen_edges:
                 continue
-            if not grid.shared_edge_has_road(x, y, nx, ny):
+            if not grid_edge_has_road(grid, nxt):
                 continue
-            seen.add((nx, ny))
-            q.append((nx, ny))
-    return seen
+            seen_edges.add(nxt)
+            q.append(nxt)
+
+    plots: set[Coord] = set()
+    for edge in seen_edges:
+        for x, y, _side in edge_touching_plots(edge):
+            if grid.in_bounds(x, y) and grid.get(x, y).plot is not None:
+                plots.add((x, y))
+    plots.add(start)
+    return plots
 
 
 def manhattan(a: Coord, b: Coord) -> int:
@@ -281,6 +517,12 @@ __all__ = [
     "active_road_sides",
     "edge_step_cost",
     "neighbors4",
+    "plot_side_to_edge",
+    "plot_incident_edges",
+    "grid_edge_has_road",
+    "mark_grid_edge",
+    "shortest_street_path",
+    "lay_roads_along_edges",
     "shortest_path",
     "lay_roads_along_path",
     "connect_points",

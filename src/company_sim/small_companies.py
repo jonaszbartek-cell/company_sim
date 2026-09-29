@@ -145,10 +145,15 @@ def wire_startup_roads(world: World) -> dict[str, object]:
 
     Order:
       1. Every City Hall plot gets roads on all four sides (N/E/S/W)
-      2. Side-road paths from each hall to its small companies
-      3. Side-road paths linking all halls (Manhattan MST)
+      2. Edge-street paths from each hall to its small-company **building**
+      3. Edge-street paths linking all halls (Manhattan MST)
+      4. Verify every small company building is street-connected; retry if needed
+
+    Pathfinding routes along plot **edges** (street graph), not tile centers.
     Shared boundaries may be marked on both plots (double-sided OK).
     """
+    from company_sim.roads import connect_points, plots_road_connected
+
     halls: list[tuple[int, int]] = []
     hall_by_city: dict[str, tuple[int, int]] = {}
     for city in world.grid.cities.values():
@@ -160,27 +165,39 @@ def wire_startup_roads(world: World) -> dict[str, object]:
         # 1) City Hall starts with every side roaded
         seed_all_side_roads(world.grid, coord[0], coord[1])
 
-    # 2) Hall → each small company
+    # 2) Hall → each small company building (edge-street path)
     spoke_paths = 0
+    company_sites: list[tuple[str, tuple[int, int], tuple[int, int]]] = []
     for company in world.companies.values():
         if not company.is_small or not company.home_city_id:
             continue
         hall = hall_by_city.get(company.home_city_id)
         if hall is None:
             continue
-        owned = world.owned_plots("company", company.id)
-        if not owned:
+        tile = _company_building_tile(world, company.id)
+        if tile is None:
             continue
-        site = (owned[0].x, owned[0].y)
+        site = (tile.x, tile.y)
+        company_sites.append((company.id, site, hall))
         paths = connect_star(world.grid, hall, [site])
         spoke_paths += len(paths)
 
     # 3) Hall → hall
     hall_paths = connect_points_mst(world.grid, halls)
+
+    # 4) Guarantee every small-company building reaches its hall via streets
+    repaired = 0
+    for _cid, site, hall in company_sites:
+        if plots_road_connected(world.grid, site, hall):
+            continue
+        if connect_points(world.grid, site, hall) is not None:
+            repaired += 1
+
     return {
         "halls": len(halls),
         "spoke_paths": spoke_paths,
         "hall_network_paths": len(hall_paths),
+        "repaired": repaired,
     }
 
 
