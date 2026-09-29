@@ -202,6 +202,9 @@ function showSetup(defaults) {
   appEl.hidden = true;
   if (defaults) {
     if (defaults.ai_companies != null) document.getElementById("setup-companies").value = defaults.ai_companies;
+    if (defaults.small_companies_per_city != null) {
+      document.getElementById("setup-small-per-city").value = defaults.small_companies_per_city;
+    }
     if (defaults.cities != null) document.getElementById("setup-cities").value = defaults.cities;
     if (defaults.map_size != null) document.getElementById("setup-map").value = defaults.map_size;
     const pctEl = document.getElementById("setup-specialized-pct");
@@ -595,7 +598,14 @@ function refreshPanels() {
 
 function applyPayload(payload) {
   if (payload.type === "setup" || payload.started === false) {
-    if (!started) showSetup(payload.defaults || payload);
+    // Don't clobber in-progress start-screen edits when WS reconnects / re-pushes defaults.
+    if (!started) {
+      if (setupEl.hidden) showSetup(payload.defaults || payload);
+      else {
+        setupEl.hidden = false;
+        appEl.hidden = true;
+      }
+    }
     return;
   }
   if (payload.state) {

@@ -213,16 +213,39 @@ def playwright_form_submit(port: int, body: dict, shot: Path) -> dict:
             page.check("#setup-llm-debug")
         else:
             page.uncheck("#setup-llm-debug")
+        # Ensure WS setup push has landed before submit (and not overwritten fills)
+        page.wait_for_timeout(300)
+        # Re-apply fills after any late WS defaults (guards remaining races)
+        page.fill("#setup-companies", str(body["ai_companies"]))
+        page.fill("#setup-small-per-city", str(body["small_companies_per_city"]))
+        page.fill("#setup-cities", str(body["cities"]))
+        page.fill("#setup-map", str(body["map_size"]))
+        page.fill("#setup-specialized-pct", str(body["specialized_plot_percent"]))
+        if body.get("llm_debug"):
+            page.check("#setup-llm-debug")
+        else:
+            page.uncheck("#setup-llm-debug")
+        # Verify the form holds our values before submit
+        assert page.input_value("#setup-companies") == str(body["ai_companies"])
+        assert page.input_value("#setup-small-per-city") == str(body["small_companies_per_city"])
+        assert page.input_value("#setup-cities") == str(body["cities"])
+        assert page.input_value("#setup-map") == str(body["map_size"])
+        assert page.input_value("#setup-specialized-pct") == str(body["specialized_plot_percent"])
         page.click("#btn-start")
-        # Success: setup hides, game canvas shows
-        page.wait_for_selector("#app:not([hidden])", timeout=60000)
-        page.wait_for_selector("#setup[hidden]", timeout=5000)
+        # Success: game app becomes visible (setup gets the hidden attribute)
+        page.wait_for_selector("#app", state="visible", timeout=60000)
+        page.wait_for_function(
+            "() => document.getElementById('setup')?.hidden === true",
+            timeout=10000,
+        )
         err = page.locator("#setup-error")
-        if err.is_visible():
+        if err.count() and err.is_visible():
             raise AssertionError(f"setup error visible: {err.inner_text()}")
         # Canvas should have drawn something
         canvas = page.locator("canvas").first
         canvas.wait_for(state="visible", timeout=10000)
+        # Give draw() a beat on large maps
+        page.wait_for_timeout(500)
         page.screenshot(path=str(shot), full_page=True)
         # Confirm state endpoint matches what form sent
         st = page.evaluate("async () => (await fetch('/api/state')).json()")
@@ -269,77 +292,87 @@ def main() -> int:
     t0 = time.time()
     failures: list[dict] = []
     counts = {"world_ok": 0, "api_ok": 0, "world_fail": 0, "api_fail": 0, "front_ok": 0, "front_fail": 0}
+    frontend_only = os.environ.get("FRONTEND_ONLY") == "1"
 
-    print("=== frontend form contract ===")
-    try:
-        frontend_form_contract()
-        counts["front_ok"] += 1
-        print("OK form contract")
-    except Exception as exc:  # noqa: BLE001
-        counts["front_fail"] += 1
-        failures.append({"label": "form_contract", "params": {}, "error": str(exc), "trace": traceback.format_exc()[-1500:]})
-        print("FAIL form contract", exc)
+    if not frontend_only:
+        print("=== frontend form contract ===")
+        try:
+            frontend_form_contract()
+            counts["front_ok"] += 1
+            print("OK form contract")
+        except Exception as exc:  # noqa: BLE001
+            counts["front_fail"] += 1
+            failures.append({"label": "form_contract", "params": {}, "error": str(exc), "trace": traceback.format_exc()[-1500:]})
+            print("FAIL form contract", exc)
 
-    print("=== axis sweeps (World + API) ===")
-    for label, expect in axis_cases():
-        before = len(failures)
-        record(failures, f"world:{label}", expect, run_world)
-        if len(failures) == before:
-            counts["world_ok"] += 1
-        else:
-            counts["world_fail"] += 1
-            print("FAIL world", label, failures[-1]["error"])
-            continue
-        # API on axis extremes / defaults denser sample
-        do_api = (
-            "axis_ai_" in label
-            or "axis_small_" in label
-            or "axis_cities_" in label
-            or "axis_llm_" in label
-            or expect["map_size"] in (2, 8, 12, 32, 64, 96, 128)
-            or expect["specialized_plot_percent"] in (0, 15, 50, 100)
-        )
-        if do_api:
+        print("=== axis sweeps (World + API) ===")
+        for label, expect in axis_cases():
             before = len(failures)
-            record(failures, f"api:{label}", expect, run_api)
+            record(failures, f"world:{label}", expect, run_world)
+            if len(failures) == before:
+                counts["world_ok"] += 1
+            else:
+                counts["world_fail"] += 1
+                print("FAIL world", label, failures[-1]["error"])
+                continue
+            do_api = (
+                "axis_ai_" in label
+                or "axis_small_" in label
+                or "axis_cities_" in label
+                or "axis_llm_" in label
+                or expect["map_size"] in (2, 8, 12, 32, 64, 96, 128)
+                or expect["specialized_plot_percent"] in (0, 15, 50, 100)
+            )
+            if do_api:
+                before = len(failures)
+                record(failures, f"api:{label}", expect, run_api)
+                if len(failures) == before:
+                    counts["api_ok"] += 1
+                else:
+                    counts["api_fail"] += 1
+                    print("FAIL api", label, failures[-1]["error"])
+
+        print(f"=== cartesian World ({len(FEASIBLE_CART)} combos) ===")
+        for i, (label, expect) in enumerate(cartesian_cases()):
+            before = len(failures)
+            record(failures, f"world:{label}", expect, run_world)
+            if len(failures) == before:
+                counts["world_ok"] += 1
+            else:
+                counts["world_fail"] += 1
+                print("FAIL world", label, failures[-1]["error"])
+            if (i + 1) % 100 == 0:
+                print(f"  ... {i+1}/{len(FEASIBLE_CART)} world ok={counts['world_ok']} fail={counts['world_fail']}")
+
+        api_cart = [
+            e
+            for _, e in cartesian_cases()
+            if e["llm_debug"] is False
+            and e["map_size"] in (2, 12, 24, 48)
+            and e["specialized_plot_percent"] in (0, 15, 100)
+        ]
+        print(f"=== cartesian API ({len(api_cart)} combos) ===")
+        for i, expect in enumerate(api_cart):
+            label = f"api_ai{expect['ai_companies']}_sm{expect['small_companies_per_city']}_ci{expect['cities']}_m{expect['map_size']}_sp{expect['specialized_plot_percent']}"
+            before = len(failures)
+            record(failures, label, expect, run_api)
             if len(failures) == before:
                 counts["api_ok"] += 1
             else:
                 counts["api_fail"] += 1
                 print("FAIL api", label, failures[-1]["error"])
-
-    print(f"=== cartesian World ({len(FEASIBLE_CART)} combos) ===")
-    for i, (label, expect) in enumerate(cartesian_cases()):
-        before = len(failures)
-        record(failures, f"world:{label}", expect, run_world)
-        if len(failures) == before:
-            counts["world_ok"] += 1
-        else:
-            counts["world_fail"] += 1
-            print("FAIL world", label, failures[-1]["error"])
-        if (i + 1) % 100 == 0:
-            print(f"  ... {i+1}/{len(FEASIBLE_CART)} world ok={counts['world_ok']} fail={counts['world_fail']}")
-
-    # Thinner API cartesian
-    api_cart = [
-        e
-        for _, e in cartesian_cases()
-        if e["llm_debug"] is False
-        and e["map_size"] in (2, 12, 24, 48)
-        and e["specialized_plot_percent"] in (0, 15, 100)
-    ]
-    print(f"=== cartesian API ({len(api_cart)} combos) ===")
-    for i, expect in enumerate(api_cart):
-        label = f"api_ai{expect['ai_companies']}_sm{expect['small_companies_per_city']}_ci{expect['cities']}_m{expect['map_size']}_sp{expect['specialized_plot_percent']}"
-        before = len(failures)
-        record(failures, label, expect, run_api)
-        if len(failures) == before:
-            counts["api_ok"] += 1
-        else:
-            counts["api_fail"] += 1
-            print("FAIL api", label, failures[-1]["error"])
-        if (i + 1) % 50 == 0:
-            print(f"  ... {i+1}/{len(api_cart)}")
+            if (i + 1) % 50 == 0:
+                print(f"  ... {i+1}/{len(api_cart)}")
+    else:
+        print("=== FRONTEND_ONLY mode ===")
+        try:
+            frontend_form_contract()
+            counts["front_ok"] += 1
+            print("OK form contract")
+        except Exception as exc:  # noqa: BLE001
+            counts["front_fail"] += 1
+            failures.append({"label": "form_contract", "params": {}, "error": str(exc), "trace": traceback.format_exc()[-1500:]})
+            print("FAIL form contract", exc)
 
     print("=== frontend Playwright form submit combos ===")
     port = 8791
@@ -386,6 +419,7 @@ def main() -> int:
         "elapsed_s": round(time.time() - t0, 1),
         "counts": counts,
         "feasible_cartesian": len(FEASIBLE_CART),
+        "frontend_only": frontend_only,
         "sample_grid": {
             "ai": CART_AI,
             "small": CART_SMALL,

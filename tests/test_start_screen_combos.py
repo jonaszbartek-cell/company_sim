@@ -142,15 +142,18 @@ FEASIBLE_CART = [row for row in CARTESIAN if _feasible(row[0], row[1], row[2], r
 PYTEST_CART = [
     row
     for row in FEASIBLE_CART
-    if row[3] in (2, 12, 24, 48)
+    if row[3] in (2, 12, 24)
     and row[4] in (0, 15, 100)
-    and (row[5] is False or (row[0] == 0 and row[1] == 0))
+    and row[5] is False
+    and row[0] in (0, 2, 12)
+    and row[1] in (0, 10, 20)
+    and row[2] in (1, 4, 8)
 ]
 
 API_CART = [
     row
     for row in PYTEST_CART
-    if row[5] is False and row[3] in (2, 12, 24)
+    if row[3] in (2, 12)
 ]
 
 
@@ -234,6 +237,14 @@ def test_cartesian_api(
         specialized_plot_percent=pct,
         llm_debug=llm,
     )
+
+
+def test_frontend_show_setup_includes_small_companies_and_guards_ws_clobber() -> None:
+    js = Path("web/app.js").read_text(encoding="utf-8")
+    assert "setup-small-per-city" in js
+    assert "defaults.small_companies_per_city" in js
+    # WS setup push must not overwrite an already-visible start form
+    assert "if (setupEl.hidden) showSetup" in js
 
 
 def test_frontend_setup_form_ranges_match_api() -> None:
