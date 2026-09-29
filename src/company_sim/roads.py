@@ -53,14 +53,26 @@ def ensure_shared_road(grid: GridMap, x1: int, y1: int, x2: int, y2: int) -> boo
     return a_ok or b_ok or grid.shared_edge_has_road(x1, y1, x2, y2)
 
 
-def seed_all_side_roads(grid: GridMap, x: int, y: int) -> bool:
-    """Put a road on every side (N/E/S/W) of this plot. Used for City Hall at start."""
+def seed_all_side_roads(
+    grid: GridMap, x: int, y: int, *, double_sided: bool = True
+) -> bool:
+    """Put a road on every side (N/E/S/W) of this plot (City Hall at start).
+
+    When ``double_sided`` is True (default), also mark the matching opposite
+    side on each neighboring plot so the shared edge is roaded from both tiles.
+    """
     if not grid.in_bounds(x, y) or grid.get(x, y).plot is None:
         return False
     ok = True
     for side in SIDES:
         if not ensure_edge_road(grid, x, y, side):
             ok = False
+            continue
+        if not double_sided:
+            continue
+        dx, dy = SIDE_DELTA[side]
+        nx, ny = x + dx, y + dy
+        ensure_edge_road(grid, nx, ny, OPPOSITE[side])
     return ok
 
 

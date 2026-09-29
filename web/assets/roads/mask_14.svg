@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
 <rect width="64" height="64" fill="none"/>
-<rect x="18" y="18" width="28" height="28" fill="#3a3f46"/>
-<rect x="25.0" y="32" width="14" height="32" fill="#3a3f46"/>
-<rect x="27.0" y="32" width="1.5" height="32" fill="#f4f1de" opacity="0.9"/>
-<rect x="35.5" y="32" width="1.5" height="32" fill="#f4f1de" opacity="0.9"/>
-<rect x="0" y="25.0" width="32" height="14" fill="#3a3f46"/>
-<rect x="0" y="27.0" width="32" height="1.5" fill="#f4f1de" opacity="0.9"/>
-<rect x="0" y="35.5" width="32" height="1.5" fill="#f4f1de" opacity="0.9"/>
-<rect x="32" y="25.0" width="32" height="14" fill="#3a3f46"/>
-<rect x="32" y="27.0" width="32" height="1.5" fill="#f4f1de" opacity="0.9"/>
-<rect x="32" y="35.5" width="32" height="1.5" fill="#f4f1de" opacity="0.9"/>
-<circle cx="32" cy="32" r="2" fill="#f4f1de" opacity="0.55"/>
+<rect x="0" y="54" width="64" height="10" fill="#3a3f46"/>
+<rect x="0" y="56" width="64" height="1.5" fill="#f4f1de" opacity="0.85"/>
+<rect x="0" y="60.5" width="64" height="1.5" fill="#f4f1de" opacity="0.9"/>
+<rect x="0" y="0" width="10" height="64" fill="#3a3f46"/>
+<rect x="2" y="0" width="1.5" height="64" fill="#f4f1de" opacity="0.9"/>
+<rect x="6.5" y="0" width="1.5" height="64" fill="#f4f1de" opacity="0.85"/>
+<rect x="54" y="0" width="10" height="64" fill="#3a3f46"/>
+<rect x="56" y="0" width="1.5" height="64" fill="#f4f1de" opacity="0.85"/>
+<rect x="60.5" y="0" width="1.5" height="64" fill="#f4f1de" opacity="0.9"/>
+<rect x="0" y="54" width="10" height="10" fill="#3a3f46"/>
+<rect x="54" y="54" width="10" height="10" fill="#3a3f46"/>
 </svg>

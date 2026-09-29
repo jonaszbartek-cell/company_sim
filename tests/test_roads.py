@@ -288,11 +288,32 @@ def test_startup_roads_small_cos_to_hall_and_halls_together():
 
 def test_seed_all_side_roads_helper():
     from company_sim.roads import active_road_sides, seed_all_side_roads
+    from company_sim.plots import OPPOSITE, SIDE_DELTA
 
     g = _empty_grid(4)
     assert seed_all_side_roads(g, 2, 2) is True
     assert active_road_sides(g, 2, 2) == ["N", "E", "S", "W"]
     assert g.road_mask_at(2, 2) == 15
+    # Double-sided stubs on the four neighbors
+    for side, (dx, dy) in SIDE_DELTA.items():
+        nx, ny = 2 + dx, 2 + dy
+        assert g.has_road_on_side(nx, ny, OPPOSITE[side])
+        assert g.shared_edge_has_road(2, 2, nx, ny)
+
+
+def test_city_hall_neighbor_stubs_are_double_sided():
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), map_size=12, starting_cities=1, small_companies_per_city=0)
+        from company_sim.plots import OPPOSITE, SIDE_DELTA
+        from company_sim.small_companies import city_hall_coord
+
+        h = city_hall_coord(w, "city_a")
+        assert h is not None
+        hx, hy = h
+        assert w.grid.road_mask_at(hx, hy) == 15
+        for side, (dx, dy) in SIDE_DELTA.items():
+            nx, ny = hx + dx, hy + dy
+            assert w.grid.has_road_on_side(nx, ny, OPPOSITE[side]), (side, nx, ny)
 
 
 

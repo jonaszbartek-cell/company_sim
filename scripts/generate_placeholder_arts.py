@@ -158,7 +158,11 @@ def grass_tile() -> str:
 
 
 def road_mask_svg(mask: int) -> str:
-    """Draw asphalt edges with side lines for N/E/S/W bits."""
+    """Draw asphalt on the plot's outer edges (N/E/S/W), not through the center.
+
+    Each bit paints a strip flush with that side of the 64×64 tile so double-sided
+    shared edges meet cleanly on the boundary between two plots.
+    """
     n = bool(mask & 1)
     e = bool(mask & 2)
     s = bool(mask & 4)
@@ -168,75 +172,63 @@ def road_mask_svg(mask: int) -> str:
         '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">',
         '<rect width="64" height="64" fill="none"/>',
     ]
-    # Asphalt strip geometry
-    thick = 14
+    # Edge strip thickness (stays on the border; neighbors draw the other half)
+    thick = 10
     line = 1.5
+    asphalt = "#3a3f46"
+    stripe = "#f4f1de"
 
-    def h_strip(y: float) -> None:
-        parts.append(
-            f'<rect x="0" y="{y}" width="64" height="{thick}" fill="#3a3f46"/>'
-        )
-        parts.append(
-            f'<rect x="0" y="{y + 2}" width="64" height="{line}" fill="#f4f1de" opacity="0.9"/>'
-        )
-        parts.append(
-            f'<rect x="0" y="{y + thick - 2 - line}" width="64" height="{line}" fill="#f4f1de" opacity="0.9"/>'
-        )
-
-    def v_strip(x: float) -> None:
-        parts.append(
-            f'<rect x="{x}" y="0" width="{thick}" height="64" fill="#3a3f46"/>'
-        )
-        parts.append(
-            f'<rect x="{x + 2}" y="0" width="{line}" height="64" fill="#f4f1de" opacity="0.9"/>'
-        )
-        parts.append(
-            f'<rect x="{x + thick - 2 - line}" y="0" width="{line}" height="64" fill="#f4f1de" opacity="0.9"/>'
-        )
-
-    # Draw center junction pad when 2+ directions meet
-    dirs = sum([n, e, s, w])
-    if dirs >= 2:
-        parts.append('<rect x="18" y="18" width="28" height="28" fill="#3a3f46"/>')
-
+    # North edge — horizontal strip along top
     if n:
-        parts.append(f'<rect x="{(64 - thick) / 2}" y="0" width="{thick}" height="32" fill="#3a3f46"/>')
+        parts.append(f'<rect x="0" y="0" width="64" height="{thick}" fill="{asphalt}"/>')
         parts.append(
-            f'<rect x="{(64 - thick) / 2 + 2}" y="0" width="{line}" height="32" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="0" y="2" width="64" height="{line}" fill="{stripe}" opacity="0.9"/>'
         )
         parts.append(
-            f'<rect x="{(64 - thick) / 2 + thick - 2 - line}" y="0" width="{line}" height="32" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="0" y="{thick - 2 - line}" width="64" height="{line}" fill="{stripe}" opacity="0.85"/>'
         )
+    # South edge — horizontal strip along bottom
     if s:
-        parts.append(f'<rect x="{(64 - thick) / 2}" y="32" width="{thick}" height="32" fill="#3a3f46"/>')
+        y0 = 64 - thick
+        parts.append(f'<rect x="0" y="{y0}" width="64" height="{thick}" fill="{asphalt}"/>')
         parts.append(
-            f'<rect x="{(64 - thick) / 2 + 2}" y="32" width="{line}" height="32" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="0" y="{y0 + 2}" width="64" height="{line}" fill="{stripe}" opacity="0.85"/>'
         )
         parts.append(
-            f'<rect x="{(64 - thick) / 2 + thick - 2 - line}" y="32" width="{line}" height="32" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="0" y="{64 - 2 - line}" width="64" height="{line}" fill="{stripe}" opacity="0.9"/>'
         )
+    # West edge — vertical strip along left
     if w:
-        parts.append(f'<rect x="0" y="{(64 - thick) / 2}" width="32" height="{thick}" fill="#3a3f46"/>')
+        parts.append(f'<rect x="0" y="0" width="{thick}" height="64" fill="{asphalt}"/>')
         parts.append(
-            f'<rect x="0" y="{(64 - thick) / 2 + 2}" width="32" height="{line}" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="2" y="0" width="{line}" height="64" fill="{stripe}" opacity="0.9"/>'
         )
         parts.append(
-            f'<rect x="0" y="{(64 - thick) / 2 + thick - 2 - line}" width="32" height="{line}" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="{thick - 2 - line}" y="0" width="{line}" height="64" fill="{stripe}" opacity="0.85"/>'
         )
+    # East edge — vertical strip along right
     if e:
-        parts.append(f'<rect x="32" y="{(64 - thick) / 2}" width="32" height="{thick}" fill="#3a3f46"/>')
+        x0 = 64 - thick
+        parts.append(f'<rect x="{x0}" y="0" width="{thick}" height="64" fill="{asphalt}"/>')
         parts.append(
-            f'<rect x="32" y="{(64 - thick) / 2 + 2}" width="32" height="{line}" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="{x0 + 2}" y="0" width="{line}" height="64" fill="{stripe}" opacity="0.85"/>'
         )
         parts.append(
-            f'<rect x="32" y="{(64 - thick) / 2 + thick - 2 - line}" width="32" height="{line}" fill="#f4f1de" opacity="0.9"/>'
+            f'<rect x="{64 - 2 - line}" y="0" width="{line}" height="64" fill="{stripe}" opacity="0.9"/>'
         )
 
-    # Corner fillets / center lines for crosses
-    if dirs >= 2:
+    # Corner caps where two edge strips meet (keeps junctions solid on the border)
+    if n and w:
+        parts.append(f'<rect x="0" y="0" width="{thick}" height="{thick}" fill="{asphalt}"/>')
+    if n and e:
+        parts.append(f'<rect x="{64 - thick}" y="0" width="{thick}" height="{thick}" fill="{asphalt}"/>')
+    if s and w:
+        parts.append(f'<rect x="0" y="{64 - thick}" width="{thick}" height="{thick}" fill="{asphalt}"/>')
+    if s and e:
         parts.append(
-            '<circle cx="32" cy="32" r="2" fill="#f4f1de" opacity="0.55"/>'
+            f'<rect x="{64 - thick}" y="{64 - thick}" width="{thick}" height="{thick}" fill="{asphalt}"/>'
         )
+
     parts.append("</svg>")
     return "\n".join(parts)
 
