@@ -9,7 +9,7 @@ from company_sim.actors import Company
 from company_sim.buildings import Building
 from company_sim.items import Inventory
 from company_sim.plots import PlotType
-from company_sim.roads import connect_points_mst, connect_star, manhattan
+from company_sim.roads import connect_points_mst, connect_star, manhattan, seed_all_side_roads
 
 if TYPE_CHECKING:
     from company_sim.world import World
@@ -141,15 +141,26 @@ def spawn_small_companies(world: World, *, rng: random.Random | None = None) -> 
 
 
 def wire_startup_roads(world: World) -> dict[str, object]:
-    """Connect each small company to its city hall, then interconnect all halls."""
+    """Seed City Hall side-roads, then connect small companies and halls.
+
+    Order:
+      1. Every City Hall plot gets roads on all four sides (N/E/S/W)
+      2. Side-road paths from each hall to its small companies
+      3. Side-road paths linking all halls (Manhattan MST)
+    Shared boundaries may be marked on both plots (double-sided OK).
+    """
     halls: list[tuple[int, int]] = []
     hall_by_city: dict[str, tuple[int, int]] = {}
     for city in world.grid.cities.values():
         coord = city_hall_coord(world, city.id)
-        if coord is not None:
-            halls.append(coord)
-            hall_by_city[city.id] = coord
+        if coord is None:
+            continue
+        halls.append(coord)
+        hall_by_city[city.id] = coord
+        # 1) City Hall starts with every side roaded
+        seed_all_side_roads(world.grid, coord[0], coord[1])
 
+    # 2) Hall → each small company
     spoke_paths = 0
     for company in world.companies.values():
         if not company.is_small or not company.home_city_id:
@@ -161,9 +172,10 @@ def wire_startup_roads(world: World) -> dict[str, object]:
         if not owned:
             continue
         site = (owned[0].x, owned[0].y)
-        path = connect_star(world.grid, hall, [site])
-        spoke_paths += len(path)
+        paths = connect_star(world.grid, hall, [site])
+        spoke_paths += len(paths)
 
+    # 3) Hall → hall
     hall_paths = connect_points_mst(world.grid, halls)
     return {
         "halls": len(halls),

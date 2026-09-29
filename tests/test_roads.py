@@ -241,18 +241,35 @@ def _world(td: Path, **kwargs) -> World:
     return World.new_game(WorldConfig(**cfg))
 
 
+def test_city_hall_starts_with_all_four_side_roads():
+    """City Hall plot always has N/E/S/W roads before/after network wiring."""
+    with tempfile.TemporaryDirectory() as td:
+        w = _world(Path(td), map_size=14, starting_cities=2, small_companies_per_city=2)
+        from company_sim.roads import active_road_sides
+        from company_sim.small_companies import city_hall_coord
+
+        for city in w.grid.cities.values():
+            h = city_hall_coord(w, city.id)
+            assert h is not None
+            sides = active_road_sides(w.grid, *h)
+            assert sides == ["N", "E", "S", "W"], sides
+            assert w.grid.road_mask_at(*h) == 15  # N|E|S|W
+
+
 def test_startup_roads_small_cos_to_hall_and_halls_together():
     with tempfile.TemporaryDirectory() as td:
         w = _world(Path(td), map_size=20, starting_cities=3, small_companies_per_city=3)
+        from company_sim.roads import active_road_sides
         from company_sim.small_companies import city_hall_coord
 
         halls = []
         for city in w.grid.cities.values():
             h = city_hall_coord(w, city.id)
             assert h is not None
+            assert active_road_sides(w.grid, *h) == ["N", "E", "S", "W"]
             halls.append(h)
 
-        # Halls interconnected
+        # Halls interconnected via side-roads
         assert plots_road_connected(w.grid, halls[0], halls[1])
         assert plots_road_connected(w.grid, halls[0], halls[2])
 
@@ -265,6 +282,18 @@ def test_startup_roads_small_cos_to_hall_and_halls_together():
             hall = city_hall_coord(w, co.home_city_id)  # type: ignore[arg-type]
             assert hall is not None
             assert plots_road_connected(w.grid, site, hall)
+            # Company plot has at least one side road toward the network
+            assert active_road_sides(w.grid, *site)
+
+
+def test_seed_all_side_roads_helper():
+    from company_sim.roads import active_road_sides, seed_all_side_roads
+
+    g = _empty_grid(4)
+    assert seed_all_side_roads(g, 2, 2) is True
+    assert active_road_sides(g, 2, 2) == ["N", "E", "S", "W"]
+    assert g.road_mask_at(2, 2) == 15
+
 
 
 def test_side_between_consistency_with_road_lay():
