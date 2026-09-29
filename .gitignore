@@ -9,3 +9,4 @@ build/
 .llm_models/
 *.gguf
 saves/
+company_sim.windows.json
